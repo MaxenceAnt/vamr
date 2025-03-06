@@ -8,6 +8,10 @@
 #include "../../ioread.h"
 #include "../../velocity_mesh_parameters.h"
 #include "../../logger.h"
+#include "../../open_bucket_hashtable.h"
+
+#include <Eigen/Sparse>
+#include <Eigen/Geometry>
 
 using namespace std;
 using namespace SBC;
@@ -86,6 +90,41 @@ void assignConductivityTensorFromLoadedData(std::vector<SphericalTriGrid::Node>&
    }
 }
 
+std::vector<Real> edgeJ;
+std::vector<Real> edgeLength;
+OpenBucketHashtable<uint64_t, uint> edgeIndex;
+
+// Unique lookup of edges given a pair of nodes.
+std::tuple<uint,int> getEdgeIndexOrientation(uint32_t a, uint32_t b)  {
+
+   int orientation = 0;
+
+   // Edges are sorted by adjacent node index (directed to go from smaller to larger index)
+   uint32_t low = std::min(a,b);
+   uint32_t high = std::max(a,b);
+
+   // If a->b is the natural ordering of this edge, return 1 for orientation, otherwise -1
+   if(low == a) {
+      orientation = 1;
+   } else {
+      orientation = -1;
+   }
+
+   // We use a 64bit value of both edges as the hash value
+   uint64_t hash = high;
+   hash <<= 32;
+   hash |= low;
+
+   if(edgeIndex.count(hash) == 0) {
+      // Add entry into array
+      edgeIndex[hash] = edgeJ.size();
+      edgeJ.push_back(0.);
+      edgeLength.push_back(0.);
+   }
+
+   return {edgeIndex[hash], orientation};
+}
+
 int main(int argc, char** argv) {
 
    // Init MPI
@@ -114,6 +153,7 @@ int main(int argc, char** argv) {
    bool doPrecondition = true;
    bool writeSolverMtarix = false;
    bool quiet = false;
+   bool runCurlJSolver = false;
    int multipoleL = 0;
    int multipolem = 0;
    if(argc ==1) {
@@ -172,6 +212,10 @@ int main(int argc, char** argv) {
          quiet = true;
          continue;
       }
+      if(!strcmp(argv[i], "-curlJ")) {
+         runCurlJSolver = true;
+         continue;
+      }
       cerr << "Unknown command line option \"" << argv[i] << "\"" << endl;
       cerr << endl;
       cerr << "main [-N num] [-r <lat0> <lat1>] [-sigma (identity|random|35|53|file)] [-fac (constant|dipole|quadrupole|octopole|hexadecapole||file)] [-facfile <filename>] [-gaugeFix equator|equator40|equator45|equator60|pole|integral|none] [-np]" << endl;
@@ -197,6 +241,7 @@ int main(int argc, char** argv) {
       cerr << "                multipole <L> <m> - generic multipole, L and m given separately." << endl;
       cerr << "                merkin2010        - eq13 of Merkin et al (2010)" << endl;
       cerr << "                file              - read FAC distribution from vlsv input file" << endl;
+      cerr << "                pole              - testcase: FACs are nonzero only at the north pole" << endl;
       cerr << " -infile:       Read FACs from this input file" << endl;
       cerr << " -gaugeFix:     Solver gauge fixing method (default: pole)" << endl;
       cerr << "                options are:" << endl;
@@ -210,6 +255,7 @@ int main(int argc, char** argv) {
       cerr << " -o <filename>: Output filename (default: \"output.vlsv\")" << endl;
       cerr << " -matrix:       Write solver dependency matrix to solverMatrix.txt (default: don't.)" << endl;
       cerr << " -q:            Quiet mode (only output residual value" << endl;
+      cerr << " -curlJ:        Run curlJ solver for Juusola method" << endl;
 
       return 1;
    }
@@ -433,9 +479,153 @@ int main(int argc, char** argv) {
          area /= 3.; // As every element has 3 corners, don't double-count areas
          ionosphereGrid.nodes[i].parameters[ionosphereParameters::SOURCE] *= area;
       }
+   } else if(facString == "pole") {
+      ionosphereGrid.nodes[0].parameters[ionosphereParameters::SOURCE] = 1;
+      for(uint i=1; i<ionosphereGrid.nodes.size(); i++) {
+         ionosphereGrid.nodes[i].parameters[ionosphereParameters::SOURCE] = 0;
+      }
    } else {
       cerr << "FAC pattern " << sigmaString << " not implemented!" << endl;
       return 1;
+   }
+
+
+   // Prototype implementation of Liisa Juusola's new rotJ = c * J_|| solver
+   if(runCurlJSolver) {
+
+      // Fill edge arrays
+      for(uint m=0; m<nodes.size(); m++) {
+         for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
+            SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[m].touchingElements[el]];
+
+            // Find the two other nodes on this element, to identify the far edge.
+            int i=0,j=0;
+            for(int c=0; c< 3; c++) {
+               if(element.corners[c] == m) {
+                  i=element.corners[(c+1)%3];
+                  j=element.corners[(c+2)%3];
+                  break;
+               }
+            }
+
+            auto [e,orientation] = getEdgeIndexOrientation(i,j);
+         }
+      }
+
+      // Eigen vector and matrix for solving
+      Eigen::VectorXd vJ(edgeJ.size());
+      //Eigen::VectorXd vRightHand(edgeJ.size());
+      Eigen::VectorXd vFAC(edgeJ.size());
+      Eigen::SparseMatrix<Real> curlSolverMatrix(edgeJ.size(), edgeJ.size());
+      //Eigen::SparseMatrix<Real> squareSolverMatrix(edgeJ.size(), edgeJ.size());
+
+      // Fill solver matrix and FAC vector
+      for(uint m=0; m<nodes.size(); m++) {
+
+         // Node neighborhood area
+         Real A = 0;
+         for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
+            A += ionosphereGrid.elementArea(nodes[m].touchingElements[el]);
+         }
+
+         // Curl
+         vFAC[2*m] = nodes[m].parameters[ionosphereParameters::SOURCE];
+
+         // Divergence
+         vFAC[2*m+1] = 0;
+
+         for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
+            SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[m].touchingElements[el]];
+
+            // Find the two other nodes on this element, to identify the far edge.
+            int i=0,j=0;
+            for(int c=0; c< 3; c++) {
+               if(element.corners[c] == m) {
+                  i=element.corners[(c+1)%3];
+                  j=element.corners[(c+2)%3];
+                  break;
+               }
+            }
+
+            auto [e,orientation] = getEdgeIndexOrientation(i,j);
+
+            Eigen::Vector3d r0(nodes[m].x.data());
+            Eigen::Vector3d r1(nodes[i].x.data());
+            Eigen::Vector3d r2(nodes[j].x.data());
+
+            // Edge length
+            edgeLength[e] = (r1-r2).norm();
+
+            // Make sure sign is correct (as edges are oriented)
+            Real clockwise = r0.dot((r1-r0).cross(r2-r1));
+            if(clockwise > 0) {
+               orientation *= 1;
+            } else {
+               orientation *= -1;
+            }
+
+            curlSolverMatrix.insert(2*m, e) = orientation * edgeLength[e];// / ionosphereGrid.elementArea(nodes[m].touchingElements[el]);
+
+            // Also add divergence constraints
+            std::tie(e, orientation) = getEdgeIndexOrientation(m,i);
+            curlSolverMatrix.coeffRef(2*m+1, e) = orientation;
+
+            std::tie(e, orientation) = getEdgeIndexOrientation(m,j);
+            curlSolverMatrix.coeffRef(2*m+1, e) = orientation;
+
+         }
+      }
+
+      // Add curlJ=0 constraints for every element until the solver is happy.
+      for(int el=0; el<ionosphereGrid.elements.size() && el + 2*nodes.size() < edgeJ.size(); el++) {
+         SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
+
+         int i=element.corners[0],j=element.corners[1],k=element.corners[2];
+         auto [e,orientation] = getEdgeIndexOrientation(i,j);
+         curlSolverMatrix.insert(2*nodes.size() + el, e) = orientation * edgeLength[e];
+
+         std::tie(e,orientation) = getEdgeIndexOrientation(j,k);
+         curlSolverMatrix.insert(2*nodes.size() + el, e) = orientation * edgeLength[e];
+
+         std::tie(e,orientation) = getEdgeIndexOrientation(k,i);
+         curlSolverMatrix.insert(2*nodes.size() + el, e) = orientation * edgeLength[e];
+
+         vFAC[2*nodes.size() +el] = 0;
+      }
+
+      curlSolverMatrix.makeCompressed();
+
+      // Verify Euler characteristic of the mesh
+      int Chi = nodes.size() - edgeJ.size() + ionosphereGrid.elements.size();
+      cout << "Mesh has an euler characteristic of " << Chi << endl;
+
+      //squareSolverMatrix = curlSolverMatrix.adjoint() * curlSolverMatrix;
+      //vRightHand = curlSolverMatrix.adjoint() * vFAC;
+      //squareSolverMatrix.makeCompressed();
+
+      cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeJ.size() << " edges.\n";
+      Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
+      //solver.compute(squareSolverMatrix);
+      //vJ = solver.solve(vRightHand);
+      solver.compute(curlSolverMatrix);
+      vJ = solver.solve(vFAC);
+      cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
+
+      for(uint e=0; e<edgeJ.size(); e++) {
+         edgeJ[e] = vJ[e];
+      }
+
+      ofstream matrixOut("solverMatrix.txt");
+      for(uint n=0; n<edgeJ.size(); n++) {
+         //for(uint m=0; m<edgeJ.size(); m++) {
+         //   matrixOut << squareSolverMatrix.coeffRef(n,m) << "\t";
+         //}
+         for(uint e=0; e<edgeJ.size(); e++) {
+            matrixOut << curlSolverMatrix.coeffRef(n,e) << "\t";
+         }
+         matrixOut << endl;
+      }
+      cout << "Wrote solver matrix to solverMatrix.txt.\n";
    }
 
    ionosphereGrid.initSolver(true);
@@ -567,6 +757,36 @@ int main(int argc, char** argv) {
 
          return retval;
    }));
+   if(runCurlJSolver) {
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromCurlJ", [&edgeJ, &edgeIndex, &edgeLength](
+                  SBC::SphericalTriGrid& grid)->std::vector<Real> {
+
+         std::vector<Real> retval(grid.elements.size()*3);
+
+         for(uint i=0; i<grid.elements.size(); i++) {
+            // Average J from edge values
+            // TODO: This is a current now, not a current density
+            std::array<uint32_t, 3>& corners = grid.elements[i].corners;
+
+            auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
+            auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
+            auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
+
+            for(int n=0; n<3; n++) {
+               Real r1 = grid.nodes[corners[1]].x[n] - grid.nodes[corners[0]].x[n];
+               r1 /= edgeLength[e1];
+               Real r2 = grid.nodes[corners[2]].x[n] - grid.nodes[corners[1]].x[n];
+               r2 /= edgeLength[e2];
+               Real r3 = grid.nodes[corners[0]].x[n] - grid.nodes[corners[2]].x[n];
+               r3 /= edgeLength[e3];
+
+               retval[3*i + n] = o1*edgeJ[e1] * r1 + o2*edgeJ[e2] * r2 + o3*edgeJ[e3] * r3;
+            }
+         }
+
+         return retval;
+      }));
+   }
 
    for(unsigned int i=0; i<outputDROs.size(); i++) {
       outputDROs.writeIonosphereGridData(ionosphereGrid, "ionosphere", i, outputFile);

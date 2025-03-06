@@ -85,7 +85,7 @@ fieldtracing.o: ../../fieldtracing/fieldtracing.cpp
 	${CMP} ${CXXFLAGS} ${FLAGS} ${MATHFLAGS} -c ../../fieldtracing/fieldtracing.cpp ${INC_DCCRG} ${INC_FSGRID} ${INC_BOOST} ${INC_ZOLTAN} ${INC_EIGEN} ${INC_PROFILE} ${INC_JEMALLOC}
 
 main.o: main.cpp
-	${CMP} ${CXXFLAGS} ${FLAGS} ${MATHFLAGS} -c ./main.cpp  ${INC_VLSV} ${INC_BOOST} ${INC_PROFILE} ${INC_JEMALLOC} ${INC_DCCRG} ${INC_ZOLTAN} ${INC_FSGRID}
+	${CMP} ${CXXFLAGS} ${FLAGS} ${MATHFLAGS} -c ./main.cpp  ${INC_VLSV} ${INC_BOOST} ${INC_PROFILE} ${INC_JEMALLOC} ${INC_DCCRG} ${INC_ZOLTAN} ${INC_FSGRID} ${INC_EIGEN}
 
 main: main.o ionosphere.o sysboundarycondition.o parameters.o readparameters.o object_wrapper.o particle_species.o spatial_cell.o arch_moments.o iowrite.o logger.o datareducer.o datareductionoperator.o common.o ioread.o fs_common.o version.o fieldtracing.o velocity_mesh_parameters.o
 	${LNK} ${LDFLAGS} -o main $^ $(LIBS) -lgomp
