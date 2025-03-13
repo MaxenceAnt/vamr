@@ -499,46 +499,35 @@ int main(int argc, char** argv) {
    if(runCurlJSolver) {
 
       // Fill edge arrays
-      for(uint m=0; m<nodes.size(); m++) {
-         for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
-            SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[m].touchingElements[el]];
+      for(uint32_t el=0; el< ionosphereGrid.elements.size(); el++) {
+         SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
 
-            // Find the two other nodes on this element, to identify the far edge.
-            int i=0,j=0;
-            for(int c=0; c< 3; c++) {
-               if(element.corners[c] == m) {
-                  i=element.corners[(c+1)%3];
-                  j=element.corners[(c+2)%3];
-                  break;
-               }
-            }
+         int i=element.corners[0],j=element.corners[1],k=element.corners[2];
+         Eigen::Vector3d r0(nodes[i].x.data());
+         Eigen::Vector3d r1(nodes[j].x.data());
+         Eigen::Vector3d r2(nodes[k].x.data());
 
-            auto [e,orientation] = getEdgeIndexOrientation(i,j);
-         }
+         // Edge length
+         auto [e,orientation] = getEdgeIndexOrientation(i,j);
+         edgeLength[e] = (r0-r1).norm() / 1e6;
+
+         std::tie(e, orientation) = getEdgeIndexOrientation(j,k);
+         edgeLength[e] = (r1-r2).norm() / 1e6;
+
+         std::tie(e, orientation) = getEdgeIndexOrientation(k,i);
+         edgeLength[e] = (r0-r2).norm() / 1e6;
       }
 
       // Eigen vector and matrix for solving
       Eigen::VectorXd vJ(edgeJ.size());
-      //Eigen::VectorXd vRightHand(edgeJ.size());
-      Eigen::VectorXd vFAC(edgeJ.size());
-      Eigen::SparseMatrix<Real> curlSolverMatrix(edgeJ.size(), edgeJ.size());
-      //Eigen::SparseMatrix<Real> squareSolverMatrix(edgeJ.size(), edgeJ.size());
+      Eigen::VectorXd vRHS(nodes.size() + ionosphereGrid.elements.size() + 1);
+      Eigen::SparseMatrix<Real> curlSolverMatrix(nodes.size() + ionosphereGrid.elements.size() + 1, edgeJ.size());
 
-      // Fill solver matrix and FAC vector
+      // Divergence constraints
       for(uint m=0; m<nodes.size(); m++) {
 
-         // Node neighborhood area
-         Real A = 0;
-         for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
-            A += ionosphereGrid.elementArea(nodes[m].touchingElements[el]);
-         }
-
-         // Curl
-         vFAC[2*m] = nodes[m].parameters[ionosphereParameters::SOURCE];
-
          // Divergence
-         vFAC[2*m+1] = 0;
-
+         vRHS[m] = 0;// ionosphereGrid.nodes[m].parameters[ionosphereParameters::SOURCE];
          for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
             SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[m].touchingElements[el]];
 
@@ -552,50 +541,70 @@ int main(int argc, char** argv) {
                }
             }
 
-            auto [e,orientation] = getEdgeIndexOrientation(i,j);
-
-            Eigen::Vector3d r0(nodes[m].x.data());
-            Eigen::Vector3d r1(nodes[i].x.data());
-            Eigen::Vector3d r2(nodes[j].x.data());
-
-            // Edge length
-            edgeLength[e] = (r1-r2).norm();
-
-            // Make sure sign is correct (as edges are oriented)
-            Real clockwise = r0.dot((r1-r0).cross(r2-r1));
-            if(clockwise > 0) {
-               orientation *= 1;
-            } else {
-               orientation *= -1;
-            }
-
-            curlSolverMatrix.insert(2*m, e) = orientation * edgeLength[e];// / ionosphereGrid.elementArea(nodes[m].touchingElements[el]);
-
-            // Also add divergence constraints
-            std::tie(e, orientation) = getEdgeIndexOrientation(m,i);
-            curlSolverMatrix.coeffRef(2*m+1, e) = orientation;
-
-            std::tie(e, orientation) = getEdgeIndexOrientation(m,j);
-            curlSolverMatrix.coeffRef(2*m+1, e) = orientation;
-
+            auto [e,orientation] = getEdgeIndexOrientation(m,i);
+            curlSolverMatrix.coeffRef(m, e) = orientation;
+            std::tie(e,orientation) = getEdgeIndexOrientation(m,j);
+            curlSolverMatrix.coeffRef(m, e) = orientation;
          }
       }
 
-      // Add curlJ=0 constraints for every element until the solver is happy.
-      for(int el=0; el<ionosphereGrid.elements.size() && el + 2*nodes.size() < edgeJ.size(); el++) {
+      // Add curlJ constraints for every element until the solver is happy.
+      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
          SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
+         Real A = ionosphereGrid.elementArea(el);
 
-         int i=element.corners[0],j=element.corners[1],k=element.corners[2];
+         int i=element.corners[0];
+         int j=element.corners[1];
+         int k=element.corners[2];
+
+         Eigen::Vector3d r0(nodes[i].x.data());
+         Eigen::Vector3d r1(nodes[j].x.data());
+         Eigen::Vector3d r2(nodes[k].x.data());
+
+         // Make sure sign is correct (as edges are oriented)
+         Real clockwise = r0.dot((r1-r0).cross(r2-r1));
+         if(clockwise > 0) {
+            clockwise = 1;
+         } else {
+            clockwise = -1;
+         }
+
          auto [e,orientation] = getEdgeIndexOrientation(i,j);
-         curlSolverMatrix.insert(2*nodes.size() + el, e) = orientation * edgeLength[e];
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + el, e) = orientation * edgeLength[e];
 
          std::tie(e,orientation) = getEdgeIndexOrientation(j,k);
-         curlSolverMatrix.insert(2*nodes.size() + el, e) = orientation * edgeLength[e];
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + el, e) = orientation * edgeLength[e];
 
          std::tie(e,orientation) = getEdgeIndexOrientation(k,i);
-         curlSolverMatrix.insert(2*nodes.size() + el, e) = orientation * edgeLength[e];
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + el, e) = orientation * edgeLength[e];
 
-         vFAC[2*nodes.size() +el] = 0;
+         // Distribute FACs by area ratios
+         Real A1 = 0, A2 = 0, A3 = 0;
+         for(uint e=0; e<ionosphereGrid.nodes[i].numTouchingElements; e++) {
+            A1 += ionosphereGrid.elementArea(ionosphereGrid.nodes[i].touchingElements[e]);
+         }
+         for(uint e=0; e<ionosphereGrid.nodes[j].numTouchingElements; e++) {
+            A2 += ionosphereGrid.elementArea(ionosphereGrid.nodes[j].touchingElements[e]);
+         }
+         for(uint e=0; e<ionosphereGrid.nodes[k].numTouchingElements; e++) {
+            A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
+         }
+         vRHS[ionosphereGrid.nodes.size() + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
+               + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
+               + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
+      }
+
+      // Add Harmonic constraint (by pinning a cross-equator current to zero)
+      for(const auto& [hash, edgeIdx] : edgeIndex) {
+         uint32_t node1 = hash & 0xffffffff;
+         uint32_t node2 = hash >> 32;
+
+         // Find first edge that crosses the equator
+         if(nodes[node1].x[0] * nodes[node2].x[0] < 0) {
+            curlSolverMatrix.insert(curlSolverMatrix.rows()-1, edgeIdx) = 1.;
+            vRHS(vRHS.size()-1) = 0.;
+            break;
+         }
       }
 
       curlSolverMatrix.makeCompressed();
@@ -609,28 +618,29 @@ int main(int argc, char** argv) {
       //squareSolverMatrix.makeCompressed();
 
       cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeJ.size() << " edges.\n";
-      Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
+      //Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
+      Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
       //solver.compute(squareSolverMatrix);
       //vJ = solver.solve(vRightHand);
       solver.compute(curlSolverMatrix);
-      vJ = solver.solve(vFAC);
+      vJ = solver.solve(vRHS);
       cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
 
       for(uint e=0; e<edgeJ.size(); e++) {
          edgeJ[e] = vJ[e];
       }
 
-      ofstream matrixOut("solverMatrix.txt");
-      for(uint n=0; n<edgeJ.size(); n++) {
-         //for(uint m=0; m<edgeJ.size(); m++) {
-         //   matrixOut << squareSolverMatrix.coeffRef(n,m) << "\t";
-         //}
-         for(uint e=0; e<edgeJ.size(); e++) {
-            matrixOut << curlSolverMatrix.coeffRef(n,e) << "\t";
-         }
-         matrixOut << endl;
-      }
-      cout << "Wrote solver matrix to solverMatrix.txt.\n";
+      //ofstream matrixOut("solverMatrix.txt");
+      //for(uint n=0; n<edgeJ.size(); n++) {
+      //   //for(uint m=0; m<edgeJ.size(); m++) {
+      //   //   matrixOut << squareSolverMatrix.coeffRef(n,m) << "\t";
+      //   //}
+      //   for(uint e=0; e<edgeJ.size(); e++) {
+      //      matrixOut << curlSolverMatrix.coeffRef(n,e) << "\t";
+      //   }
+      //   matrixOut << endl;
+      //}
+      //cout << "Wrote solver matrix to solverMatrix.txt.\n";
    }
 
    ionosphereGrid.initSolver(true);
