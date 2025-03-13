@@ -779,23 +779,51 @@ int main(int argc, char** argv) {
          std::vector<Real> retval(grid.elements.size()*3);
 
          for(uint i=0; i<grid.elements.size(); i++) {
-            // Average J from edge values
-            // TODO: This is a current now, not a current density
+            // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
             std::array<uint32_t, 3>& corners = grid.elements[i].corners;
+            Real A = grid.elementArea(i);
 
             auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
             auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
             auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
 
-            for(int n=0; n<3; n++) {
-               Real r1 = grid.nodes[corners[1]].x[n] - grid.nodes[corners[0]].x[n];
-               r1 /= edgeLength[e1];
-               Real r2 = grid.nodes[corners[2]].x[n] - grid.nodes[corners[1]].x[n];
-               r2 /= edgeLength[e2];
-               Real r3 = grid.nodes[corners[0]].x[n] - grid.nodes[corners[2]].x[n];
-               r3 /= edgeLength[e3];
+            Eigen::Vector3d r0(grid.nodes[corners[0]].x.data());
+            Eigen::Vector3d r1(grid.nodes[corners[1]].x.data());
+            Eigen::Vector3d r2(grid.nodes[corners[2]].x.data());
 
-               retval[3*i + n] = o1*edgeJ[e1] * r1 + o2*edgeJ[e2] * r2 + o3*edgeJ[e3] * r3;
+            Eigen::Vector3d normal = (r1-r0).cross(r2-r0).normalized();
+            Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
+
+            // Barycentric coordinates
+            auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+               return ((r0-p).cross(r1-p)).norm() / (2*A);
+            };
+            auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+               return ((r1-p).cross(r2-p)).norm() / (2*A);
+            };
+            auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+               return ((r2-p).cross(r0-p)).norm() / (2*A);
+            };
+
+            // Barycentric gradients (these are constant per element)
+            Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
+            Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
+            Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
+
+            // Whitney 1-form basis functions
+            auto w1 = [&](const Eigen::Vector3d& p) {
+              return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
+            };
+            auto w2 = [&](const Eigen::Vector3d& p) {
+              return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
+            };
+            auto w3 = [&](const Eigen::Vector3d& p) {
+              return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
+            };
+
+            Eigen::Vector3d j = o1*edgeJ[e1] * w1(barycentre) + o2*edgeJ[e2] * w2(barycentre) + o3*edgeJ[e3] *w3(barycentre);
+            for(int n=0; n<3; n++) {
+               retval[3*i + n] = j[n];
             }
          }
 
