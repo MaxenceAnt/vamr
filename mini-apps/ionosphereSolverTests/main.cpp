@@ -821,7 +821,7 @@ int main(int argc, char** argv) {
               return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
             };
 
-            Eigen::Vector3d j = o1*edgeJ[e1] * w1(barycentre) + o2*edgeJ[e2] * w2(barycentre) + o3*edgeJ[e3] *w3(barycentre);
+            Eigen::Vector3d j = o1*edgeLength[e1]*edgeJ[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJ[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJ[e3] *w3(barycentre);
             for(int n=0; n<3; n++) {
                retval[3*i + n] = j[n];
             }
