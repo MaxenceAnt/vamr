@@ -480,9 +480,14 @@ int main(int argc, char** argv) {
          ionosphereGrid.nodes[i].parameters[ionosphereParameters::SOURCE] *= area;
       }
    } else if(facString == "pole") {
-      ionosphereGrid.nodes[0].parameters[ionosphereParameters::SOURCE] = 1;
-      for(uint i=1; i<ionosphereGrid.nodes.size(); i++) {
-         ionosphereGrid.nodes[i].parameters[ionosphereParameters::SOURCE] = 0;
+      for(uint i=0; i<ionosphereGrid.nodes.size(); i++) {
+         if(ionosphereGrid.nodes[i].x[2] >= Ionosphere::innerRadius * 0.95) {
+            ionosphereGrid.nodes[i].parameters[ionosphereParameters::SOURCE] = 1;
+         } else if(ionosphereGrid.nodes[i].x[2] <= -Ionosphere::innerRadius * 0.95) {
+            ionosphereGrid.nodes[i].parameters[ionosphereParameters::SOURCE] = -1;
+         } else {
+            ionosphereGrid.nodes[i].parameters[ionosphereParameters::SOURCE] = 0;
+         }
       }
    } else {
       cerr << "FAC pattern " << sigmaString << " not implemented!" << endl;
