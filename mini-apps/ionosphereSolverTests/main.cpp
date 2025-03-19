@@ -218,7 +218,7 @@ int main(int argc, char** argv) {
       }
       cerr << "Unknown command line option \"" << argv[i] << "\"" << endl;
       cerr << endl;
-      cerr << "main [-N num] [-r <lat0> <lat1>] [-sigma (identity|random|35|53|file)] [-fac (constant|dipole|quadrupole|octopole|hexadecapole||file)] [-facfile <filename>] [-gaugeFix equator|equator40|equator45|equator60|pole|integral|none] [-np]" << endl;
+      cerr << "main [-N num] [-r <lat0> <lat1>] [-sigma (identity|random|35|53|file)] [-fac (constant|dipole|quadrupole|octopole|hexadecapole||file)] [-facfile <filename>] [-gaugeFix equator|equator40|equator45|equator50|equator60|pole|integral|none] [-np]" << endl;
       cerr << "Paramters:" << endl;
       cerr << " -N:            Number of ionosphere mesh nodes (default: 64)" << endl;
       cerr << " -r:            Refine grid between the given latitudes (can be specified multiple times)" << endl;
@@ -249,6 +249,7 @@ int main(int argc, char** argv) {
       cerr << "                equator   - Fix potential on all nodes +- 10 degrees of the equator" << endl;
       cerr << "                equator40 - Fix potential on all nodes +- 40 degrees of the equator" << endl;
       cerr << "                equator45 - Fix potential on all nodes +- 45 degrees of the equator" << endl;
+      cerr << "                equator50 - Fix potential on all nodes +- 50 degrees of the equator" << endl;
       cerr << "                equator60 - Fix potential on all nodes +- 60 degrees of the equator" << endl;
       cerr << " -np:           DON'T use the matrix preconditioner (default: do)" << endl;
       cerr << " -maxIter:      Maximum number of solver iterations" << endl;
@@ -278,6 +279,9 @@ int main(int argc, char** argv) {
    } else if (gaugeFixString == "equator45") {
       ionosphereGrid.gaugeFixing = SphericalTriGrid::Equator;
       Ionosphere::shieldingLatitude = 45.;
+   } else if (gaugeFixString == "equator50") {
+      ionosphereGrid.gaugeFixing = SphericalTriGrid::Equator;
+      Ionosphere::shieldingLatitude = 50.;
    } else if (gaugeFixString == "equator60") {
       ionosphereGrid.gaugeFixing = SphericalTriGrid::Equator;
       Ionosphere::shieldingLatitude = 60.;

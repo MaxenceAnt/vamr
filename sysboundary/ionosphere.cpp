@@ -941,9 +941,6 @@ namespace SBC {
          {{0,1,0},{-1,0,0},{0,0,0}}
       };
 
-      // Pre-transformed F10_7 values
-      Real F10_7_p_049 = pow(F10_7, 0.49);
-      Real F10_7_p_053 = pow(F10_7, 0.53);
 
       for(uint n=0; n<nodes.size(); n++) {
 
@@ -952,13 +949,28 @@ namespace SBC {
 
          // At restart we have SIGMAP, SIGMAH and SIGMAPARALLEL read in from the restart file already.
          if(!refillTensorAtRestart) {
+
             // Solar incidence parameter for calculating UV ionisation on the dayside
             Real coschi = x[0] / Ionosphere::innerRadius;
             if(coschi < 0) {
                coschi = 0;
             }
+#ifdef MOEN_AND_BREKKE
+            // Pre-transformed F10_7 values
+            Real F10_7_p_049 = pow(F10_7, 0.49);
+            Real F10_7_p_053 = pow(F10_7, 0.53);
             Real sigmaP_dayside = backgroundIonisation + F10_7_p_049 * (0.34 * coschi + 0.93 * sqrt(coschi));
             Real sigmaH_dayside = backgroundIonisation + F10_7_p_053 * (0.81 * coschi + 0.54 * sqrt(coschi));
+#else // Not MOEN_AND_BREKKE, but JUUSOLA2025
+            const Real c1p = 0.585;
+            const Real c2p = 0.582;
+            const real c3p = 0.267;
+            const Real c1h = 1.854;
+            const Real c2h = 0.409;
+            const Real c3h = 0.353;
+            Real SigmaP_dayside = c1p * pow(F10_7, c2p) * pow(coschi*coschi, c3p);
+            Real SigmaH_dayside = c1h * pow(F10_7, c2h) * pow(coschi*coschi, c3h);
+#endif
 
             nodes[n].parameters[ionosphereParameters::SIGMAP] = sqrt( pow(nodes[n].parameters[ionosphereParameters::SIGMAP],2) + pow(sigmaP_dayside,2));
             nodes[n].parameters[ionosphereParameters::SIGMAH] = sqrt( pow(nodes[n].parameters[ionosphereParameters::SIGMAH],2) + pow(sigmaH_dayside,2));
