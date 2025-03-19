@@ -1,4 +1,5 @@
 #include <iostream>
+#include <sys/time.h>
 #include "vlsv_writer.h"
 #include "vlsv_reader_parallel.h"
 #include "../../sysboundary/ionosphere.h"
@@ -682,7 +683,36 @@ int main(int argc, char** argv) {
    ionosphereGrid.rank = 0;
    int iterations, nRestarts;
    Real residual = std::numeric_limits<Real>::max(), minPotentialN, minPotentialS, maxPotentialN, maxPotentialS;
+
+   // Measure solver timing
+   timeval tStart, tEnd;
+   gettimeofday(&tStart, NULL);
    ionosphereGrid.solve(iterations, nRestarts, residual, minPotentialN, maxPotentialN, minPotentialS, maxPotentialS);
+   gettimeofday(&tEnd, NULL);
+   double solverTime = (tEnd.tv_sec - tStart.tv_sec) + (tEnd.tv_usec - tStart.tv_usec) / 1000000.0;
+   cout << "Own solver took " << solverTime << " seconds.\n";
+
+   // Do the same solution using Eigen solver
+   Eigen::SparseMatrix<Real> potentialSolverMatrix(nodes.size(), nodes.size());
+   Eigen::VectorXd vRightHand(nodes.size()), vPhi(nodes.size());
+   for(uint n=0; n<nodes.size(); n++) {
+      for(uint m=0; m<nodes[n].numDepNodes; m++) {
+         // TODO: Ignore gauge constrained nodes
+         potentialSolverMatrix.insert(n, nodes[n].dependingNodes[m]) = nodes[n].dependingCoeffs[m];
+      }
+
+      vRightHand[n] = nodes[n].parameters[ionosphereParameters::SOURCE];
+   }
+   gettimeofday(&tStart, NULL);
+   potentialSolverMatrix.makeCompressed();
+   Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
+   solver.compute(potentialSolverMatrix);
+   vPhi = solver.solve(vRightHand);
+   gettimeofday(&tEnd, NULL);
+   cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
+   solverTime = (tEnd.tv_sec - tStart.tv_sec) + (tEnd.tv_usec - tStart.tv_usec) / 1000000.0;
+   cout << "Eigen solver took " << solverTime << " seconds.\n";
+
    if(!quiet) {
       cout << "Ionosphere solver: iterations " << iterations << " restarts " << nRestarts
          << " residual " << std::scientific << residual << std::defaultfloat
