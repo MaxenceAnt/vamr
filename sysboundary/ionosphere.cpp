@@ -964,12 +964,12 @@ namespace SBC {
 #else // Not MOEN_AND_BREKKE, but JUUSOLA2025
             const Real c1p = 0.585;
             const Real c2p = 0.582;
-            const real c3p = 0.267;
+            const Real c3p = 0.267;
             const Real c1h = 1.854;
             const Real c2h = 0.409;
             const Real c3h = 0.353;
-            Real SigmaP_dayside = c1p * pow(F10_7, c2p) * pow(coschi*coschi, c3p);
-            Real SigmaH_dayside = c1h * pow(F10_7, c2h) * pow(coschi*coschi, c3h);
+            Real sigmaP_dayside = c1p * pow(F10_7, c2p) * pow(coschi*coschi, c3p);
+            Real sigmaH_dayside = c1h * pow(F10_7, c2h) * pow(coschi*coschi, c3h);
 #endif
 
             nodes[n].parameters[ionosphereParameters::SIGMAP] = sqrt( pow(nodes[n].parameters[ionosphereParameters::SIGMAP],2) + pow(sigmaP_dayside,2));
