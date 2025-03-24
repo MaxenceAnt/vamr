@@ -696,8 +696,8 @@ int main(int argc, char** argv) {
    Eigen::SparseMatrix<Real> potentialSolverMatrix(nodes.size(), nodes.size());
    Eigen::VectorXd vRightHand(nodes.size()), vPhi(nodes.size());
    for(uint n=0; n<nodes.size(); n++) {
+
       for(uint m=0; m<nodes[n].numDepNodes; m++) {
-         // TODO: Ignore gauge constrained nodes
          potentialSolverMatrix.insert(n, nodes[n].dependingNodes[m]) = nodes[n].dependingCoeffs[m];
       }
 
@@ -792,6 +792,16 @@ int main(int argc, char** argv) {
 
          for(uint i=0; i<grid.nodes.size(); i++) {
             retval[i] = grid.nodes[i].parameters[ionosphereParameters::SOLUTION];
+         }
+
+         return retval;
+   }));
+   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_EigenPotential", [&vPhi](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+
+         std::vector<Real> retval(grid.nodes.size());
+
+         for(uint i=0; i<grid.nodes.size(); i++) {
+            retval[i] = vPhi[i];
          }
 
          return retval;
