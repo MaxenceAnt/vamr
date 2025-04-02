@@ -489,7 +489,7 @@ int main(int argc, char** argv) {
          Real sigmaP=20.;
          Real sigmaH=100.;
          assignConductivityTensor(nodes, sigmaP, sigmaH);
-   } else if(sigmaString == "curlJ") {
+   } else if(sigmaString == "curlJ" || sigmaString == "curlJmodified") {
       runCurlJSolver = true;
 
       // First, solve divergence-free inplane current system
@@ -637,6 +637,8 @@ int main(int argc, char** argv) {
       //}
       //cout << "Wrote solver matrix to solverMatrix.txt.\n";
 
+      bool modifiedModel = (sigmaString == "curlJmodified");
+
       // Next, evaluate Sigma as a function of inplane-J and MLT
       #pragma omp parallel for
       for(uint n=0; n < nodes.size(); n++) {
@@ -676,133 +678,137 @@ int main(int argc, char** argv) {
          Real rotJ = nodes[n].parameters[ionosphereParameters::SOURCE];
 
          // Lookup tables for fitting coefficients (note: MLT is in hours)
+         std::function<Real(Real, Real)> c4P, c4H;
+         std::function<Real(Real, Real)> c5P, c5H;
          // Uncorrected model
-          auto c4P = [](Real MLT, Real jsign) {
-            const Real values[] = {
-               1.344, // 0
-               1.161, // 3
-               0.808, // 6
-               0.640, // 9
-               1.308, // 12
-               0.439, // 15
-               0.294, // 18
-               0.815, // 21
+         if(!modifiedModel) {
+            c4P = [](Real MLT, Real jsign) {
+               const Real values[] = {
+                  1.344, // 0
+                  1.161, // 3
+                  0.808, // 6
+                  0.640, // 9
+                  1.308, // 12
+                  0.439, // 15
+                  0.294, // 18
+                  0.815, // 21
+               };
+
+               int sector = MLT * 8. / 24.;
+               Real interpolant = MLT * 8. / 24. - sector;
+               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
             };
+            c5P = [](Real MLT, Real jsign) {
+               const Real values[] = {
+                  0.318, // 0
+                  0.332, // 3
+                  0.417, // 6
+                  0.384, // 9
+                  0.118, // 12
+                  0.401, // 15
+                  0.542, // 18
+                  0.423, // 21
+               };
 
-            int sector = MLT * 8. / 24.;
-            Real interpolant = MLT * 8. / 24. - sector;
-            return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
-         };
-         auto c5P = [](Real MLT, Real jsign) {
-            const Real values[] = {
-               0.318, // 0
-               0.332, // 3
-               0.417, // 6
-               0.384, // 9
-               0.118, // 12
-               0.401, // 15
-               0.542, // 18
-               0.423, // 21
+               int sector = MLT * 8. / 24.;
+               Real interpolant = MLT * 8. / 24. - sector;
+               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
             };
+            c4H = [](Real MLT, Real jsign) {
+               const Real values[] = {
+                  1.150, // 0
+                  1.347, // 3
+                  2.150, // 6
+                  2.153, // 9
+                  1.627, // 12
+                  0.637, // 15
+                  0.238, // 18
+                  0.670, // 21
+               };
 
-            int sector = MLT * 8. / 24.;
-            Real interpolant = MLT * 8. / 24. - sector;
-            return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
-         };
-         auto c4H = [](Real MLT, Real jsign) {
-            const Real values[] = {
-               1.150, // 0
-               1.347, // 3
-               2.150, // 6
-               2.153, // 9
-               1.627, // 12
-               0.637, // 15
-               0.238, // 18
-               0.670, // 21
+               int sector = MLT * 8. / 24.;
+               Real interpolant = MLT * 8. / 24. - sector;
+               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
             };
+            c5H = [](Real MLT, Real jsign) {
+               const Real values[] = {
+                  0.473, // 0
+                  0.441, // 3
+                  0.402, // 6
+                  0.358, // 9
+                  0.319, // 12
+                  0.361, // 15
+                  0.627, // 18
+                  0.573, // 21
+               };
 
-            int sector = MLT * 8. / 24.;
-            Real interpolant = MLT * 8. / 24. - sector;
-            return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
-         };
-         auto c5H = [](Real MLT, Real jsign) {
-            const Real values[] = {
-               0.473, // 0
-               0.441, // 3
-               0.402, // 6
-               0.358, // 9
-               0.319, // 12
-               0.361, // 15
-               0.627, // 18
-               0.573, // 21
+               int sector = MLT * 8. / 24.;
+               Real interpolant = MLT * 8. / 24. - sector;
+               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
             };
-
-            int sector = MLT * 8. / 24.;
-            Real interpolant = MLT * 8. / 24. - sector;
-            return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
-         };
-
-         // Modified model
-         //auto c4P = [](Real MLT, Real jsign) {
-         //   const Real valuesPlus[] = {
-         //      1.344, 1.161, 0.808, 0.640, 1.308, 0.439, 0.294, 0.815
-         //   };
-         //   const Real valuesMinus[] = {
-         //      0.753, 0.690, 0.627, 0.564, 0.501, 0.439, 0.294, 0.815
-         //   };
-         //   int sector = MLT * 8. / 24.;
-         //   Real interpolant = MLT * 8. / 24. - sector;
-         //   if(jsign > 0) {
-         //      return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
-         //   } else {
-         //      return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
-         //   }
-         //};
-         //auto c5P = [](Real MLT, Real jsign) {
-         //   const Real valuesPlus[] = {
-         //      0.318, 0.332, 0.417, 0.384, 0.118, 0.401, 0.542, 0.423
-         //   };
-         //   const Real valuesMinus[] = {
-         //      0.420, 0.416, 0.412, 0.408, 0.405, 0.401, 0.542, 0.423
-         //   };
-         //   int sector = MLT * 8. / 24.;
-         //   Real interpolant = MLT * 8. / 24. - sector;
-         //   if(jsign > 0) {
-         //      return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
-         //   } else {
-         //      return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
-         //   }
-         //};
-         //auto c4H = [](Real MLT, Real jsign) {
-         //   const Real valuesPlus[] = {
-         //      1.150, 1.347, 2.150, 2.153, 1.627, 0.637, 0.238, 0.670
-         //   };
-         //   const Real valuesMinus[] = {
-         //      0.665, 0.659, 0.654, 0.648, 0.643, 0.637, 0.238, 0.670
-         //   };
-         //   int sector = MLT * 8. / 24.;
-         //   Real interpolant = MLT * 8. / 24. - sector;
-         //   if(jsign > 0) {
-         //      return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
-         //   } else {
-         //      return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
-         //   }
-         //};
-         //auto c5H = [](Real MLT, Real jsign) {
-         //   const Real valuesPlus[] = {
-         //      0.473, 0.441, 0.402, 0.358, 0.319, 0.361, 0.627, 0.573
-         //   };
-         //   const Real valuesMinus[] = {
-         //      0.538, 0.502, 0.467, 0.431, 0.396, 0.361, 0.627, 0.573
-         //   };
-         //   int sector = MLT * 8. / 24.;
-         //   Real interpolant = MLT * 8. / 24. - sector;
-         //   if(jsign > 0) {
-         //      return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
-         //   } else {
-         //      return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
-         //   }
-         //};
+         } else {
+            // Modified model
+            c4P = [](Real MLT, Real jsign) {
+               const Real valuesPlus[] = {
+                  1.344, 1.161, 0.808, 0.640, 1.308, 0.439, 0.294, 0.815
+               };
+               const Real valuesMinus[] = {
+                  0.753, 0.690, 0.627, 0.564, 0.501, 0.439, 0.294, 0.815
+               };
+               int sector = MLT * 8. / 24.;
+               Real interpolant = MLT * 8. / 24. - sector;
+               if(jsign > 0) {
+                  return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
+               } else {
+                  return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
+               }
+            };
+            c5P = [](Real MLT, Real jsign) {
+               const Real valuesPlus[] = {
+                  0.318, 0.332, 0.417, 0.384, 0.118, 0.401, 0.542, 0.423
+               };
+               const Real valuesMinus[] = {
+                  0.420, 0.416, 0.412, 0.408, 0.405, 0.401, 0.542, 0.423
+               };
+               int sector = MLT * 8. / 24.;
+               Real interpolant = MLT * 8. / 24. - sector;
+               if(jsign > 0) {
+                  return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
+               } else {
+                  return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
+               }
+            };
+            c4H = [](Real MLT, Real jsign) {
+               const Real valuesPlus[] = {
+                  1.150, 1.347, 2.150, 2.153, 1.627, 0.637, 0.238, 0.670
+               };
+               const Real valuesMinus[] = {
+                  0.665, 0.659, 0.654, 0.648, 0.643, 0.637, 0.238, 0.670
+               };
+               int sector = MLT * 8. / 24.;
+               Real interpolant = MLT * 8. / 24. - sector;
+               if(jsign > 0) {
+                  return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
+               } else {
+                  return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
+               }
+            };
+            c5H = [](Real MLT, Real jsign) {
+               const Real valuesPlus[] = {
+                  0.473, 0.441, 0.402, 0.358, 0.319, 0.361, 0.627, 0.573
+               };
+               const Real valuesMinus[] = {
+                  0.538, 0.502, 0.467, 0.431, 0.396, 0.361, 0.627, 0.573
+               };
+               int sector = MLT * 8. / 24.;
+               Real interpolant = MLT * 8. / 24. - sector;
+               if(jsign > 0) {
+                  return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
+               } else {
+                  return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
+               }
+            };
+         }
 
          // Formula 33 from Juusola et al 2025
          // (in A/km)
