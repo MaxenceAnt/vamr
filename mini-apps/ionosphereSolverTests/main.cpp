@@ -213,13 +213,9 @@ int main(int argc, char** argv) {
          quiet = true;
          continue;
       }
-      if(!strcmp(argv[i], "-curlJ")) {
-         runCurlJSolver = true;
-         continue;
-      }
       cerr << "Unknown command line option \"" << argv[i] << "\"" << endl;
       cerr << endl;
-      cerr << "main [-N num] [-r <lat0> <lat1>] [-sigma (identity|random|35|53|file)] [-fac (constant|dipole|quadrupole|octopole|hexadecapole||file)] [-facfile <filename>] [-gaugeFix equator|equator40|equator45|equator50|equator60|pole|integral|none] [-np]" << endl;
+      cerr << "main [-N num] [-r <lat0> <lat1>] [-sigma (identity|random|35|53|curlJ|file)] [-fac (constant|dipole|quadrupole|octopole|hexadecapole||file)] [-facfile <filename>] [-gaugeFix equator|equator40|equator45|equator50|equator60|pole|integral|none] [-np]" << endl;
       cerr << "Paramters:" << endl;
       cerr << " -N:            Number of ionosphere mesh nodes (default: 64)" << endl;
       cerr << " -r:            Refine grid between the given latitudes (can be specified multiple times)" << endl;
@@ -257,7 +253,6 @@ int main(int argc, char** argv) {
       cerr << " -o <filename>: Output filename (default: \"output.vlsv\")" << endl;
       cerr << " -matrix:       Write solver dependency matrix to solverMatrix.txt (default: don't.)" << endl;
       cerr << " -q:            Quiet mode (only output residual value" << endl;
-      cerr << " -curlJ:        Run curlJ solver for Juusola method" << endl;
 
       return 1;
    }
@@ -320,62 +315,6 @@ int main(int argc, char** argv) {
 
 
    std::vector<SphericalTriGrid::Node>& nodes = ionosphereGrid.nodes;
-
-   // Set conductivity tensors
-   if(sigmaString == "identity") {
-      for(uint n=0; n<nodes.size(); n++) {
-         for(int i=0; i<3; i++) {
-            for(int j=0; j<3; j++) {
-               nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] = ((i==j)? 1. : 0.);
-            }
-         }
-      }
-   } else if(sigmaString == "file") {
-      vlsv::ParallelReader inVlsv;
-      inVlsv.open(inputFile,MPI_COMM_WORLD,masterProcessID);
-      // Try to read the sigma tensor directly
-      if(!readIonosphereNodeVariable(inVlsv, "ig_sigma", ionosphereGrid, ionosphereParameters::SIGMA)) {
-
-         // If that doesn't exist, reconstruct it from the sigmaH and sigmaP components
-         // (This assumes that the input file was run with the "GUMICS" conductivity model. Which is reasonable,
-         // because the others don't work very well)
-         if(!quiet) {
-            cerr << "Reading conductivity tensor from ig_sigmah, ig_sigmap." << endl;
-         }
-         readIonosphereNodeVariable(inVlsv, "ig_sigmah", ionosphereGrid, ionosphereParameters::SIGMAH);
-         readIonosphereNodeVariable(inVlsv, "ig_sigmap", ionosphereGrid, ionosphereParameters::SIGMAP);
-         //readIonosphereNodeVariable(inVlsv, "ig_sigmaparallel", ionosphereGrid, ionosphereParameters::SIGMAPARALLEL);
-         assignConductivityTensorFromLoadedData(nodes);
-      }
-   } else if(sigmaString == "ponly") {
-         Real sigmaP=3.;
-         Real sigmaH=0.;
-         assignConductivityTensor(nodes, sigmaP, sigmaH);
-   } else if(sigmaString == "10") {
-         Real sigmaP=10.;
-         Real sigmaH=0.;
-         assignConductivityTensor(nodes, sigmaP, sigmaH);
-   } else if(sigmaString == "35") {
-         Real sigmaP=3.;
-         Real sigmaH=5.;
-         assignConductivityTensor(nodes, sigmaP, sigmaH);
-   } else if(sigmaString == "53") {
-         Real sigmaP=5.;
-         Real sigmaH=3.;
-         assignConductivityTensor(nodes, sigmaP, sigmaH);
-   } else if(sigmaString == "10") {
-         Real sigmaP=10.;
-         Real sigmaH=0.;
-         assignConductivityTensor(nodes, sigmaP, sigmaH);
-   } else if(sigmaString == "100") {
-         Real sigmaP=20.;
-         Real sigmaH=100.;
-         assignConductivityTensor(nodes, sigmaP, sigmaH);
-   } else {
-      cerr << "Conductivity tensor " << sigmaString << " not implemented!" << endl;
-      return 1;
-   }
-
 
    // Set FACs
    if(facString == "constant") {
@@ -500,9 +439,60 @@ int main(int argc, char** argv) {
    }
 
 
-   // Prototype implementation of Liisa Juusola's new rotJ = c * J_|| solver
-   if(runCurlJSolver) {
+   // Set conductivity tensors
+   if(sigmaString == "identity") {
+      for(uint n=0; n<nodes.size(); n++) {
+         for(int i=0; i<3; i++) {
+            for(int j=0; j<3; j++) {
+               nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] = ((i==j)? 1. : 0.);
+            }
+         }
+      }
+   } else if(sigmaString == "file") {
+      vlsv::ParallelReader inVlsv;
+      inVlsv.open(inputFile,MPI_COMM_WORLD,masterProcessID);
+      // Try to read the sigma tensor directly
+      if(!readIonosphereNodeVariable(inVlsv, "ig_sigma", ionosphereGrid, ionosphereParameters::SIGMA)) {
 
+         // If that doesn't exist, reconstruct it from the sigmaH and sigmaP components
+         // (This assumes that the input file was run with the "GUMICS" conductivity model. Which is reasonable,
+         // because the others don't work very well)
+         if(!quiet) {
+            cerr << "Reading conductivity tensor from ig_sigmah, ig_sigmap." << endl;
+         }
+         readIonosphereNodeVariable(inVlsv, "ig_sigmah", ionosphereGrid, ionosphereParameters::SIGMAH);
+         readIonosphereNodeVariable(inVlsv, "ig_sigmap", ionosphereGrid, ionosphereParameters::SIGMAP);
+         //readIonosphereNodeVariable(inVlsv, "ig_sigmaparallel", ionosphereGrid, ionosphereParameters::SIGMAPARALLEL);
+         assignConductivityTensorFromLoadedData(nodes);
+      }
+   } else if(sigmaString == "ponly") {
+         Real sigmaP=3.;
+         Real sigmaH=0.;
+         assignConductivityTensor(nodes, sigmaP, sigmaH);
+   } else if(sigmaString == "10") {
+         Real sigmaP=10.;
+         Real sigmaH=0.;
+         assignConductivityTensor(nodes, sigmaP, sigmaH);
+   } else if(sigmaString == "35") {
+         Real sigmaP=3.;
+         Real sigmaH=5.;
+         assignConductivityTensor(nodes, sigmaP, sigmaH);
+   } else if(sigmaString == "53") {
+         Real sigmaP=5.;
+         Real sigmaH=3.;
+         assignConductivityTensor(nodes, sigmaP, sigmaH);
+   } else if(sigmaString == "10") {
+         Real sigmaP=10.;
+         Real sigmaH=0.;
+         assignConductivityTensor(nodes, sigmaP, sigmaH);
+   } else if(sigmaString == "100") {
+         Real sigmaP=20.;
+         Real sigmaH=100.;
+         assignConductivityTensor(nodes, sigmaP, sigmaH);
+   } else if(sigmaString == "curlJ") {
+      runCurlJSolver = true;
+
+      // First, solve divergence-free inplane current system
       // Fill edge arrays
       for(uint32_t el=0; el< ionosphereGrid.elements.size(); el++) {
          SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
@@ -536,7 +526,7 @@ int main(int argc, char** argv) {
          for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
             SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[m].touchingElements[el]];
 
-            // Find the two other nodes on this element, to identify the far edge.
+            // Find the two other nodes on this element
             int i=0,j=0;
             for(int c=0; c< 3; c++) {
                if(element.corners[c] == m) {
@@ -575,13 +565,13 @@ int main(int argc, char** argv) {
          }
 
          auto [e,orientation] = getEdgeIndexOrientation(i,j);
-         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + el, e) = orientation * edgeLength[e];
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + el, e) = orientation * edgeLength[e] / 100e3;
 
          std::tie(e,orientation) = getEdgeIndexOrientation(j,k);
-         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + el, e) = orientation * edgeLength[e];
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + el, e) = orientation * edgeLength[e] / 100e3;
 
          std::tie(e,orientation) = getEdgeIndexOrientation(k,i);
-         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + el, e) = orientation * edgeLength[e];
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + el, e) = orientation * edgeLength[e] / 100e3;
 
          // Distribute FACs by area ratios
          Real A1 = 0, A2 = 0, A3 = 0;
@@ -646,9 +636,225 @@ int main(int argc, char** argv) {
       //   matrixOut << endl;
       //}
       //cout << "Wrote solver matrix to solverMatrix.txt.\n";
-   }
 
-   ionosphereGrid.initSolver(true);
+      // Next, evaluate Sigma as a function of inplane-J and MLT
+      #pragma omp parallel for
+      for(uint n=0; n < nodes.size(); n++) {
+         Eigen::Vector3d J(0,0,0);
+         Real A = 0;
+         int numEdges = 0;
+         Eigen::Vector3d x(nodes[n].x.data());
+
+         // Sum all incoming edges
+         for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
+            SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[el]];
+            A += ionosphereGrid.elementArea(el);
+
+            // Find the two other nodes on this element
+            int i=0,j=0;
+            for(int c=0; c< 3; c++) {
+               if(element.corners[c] == n) {
+                  i=element.corners[(c+1)%3];
+                  j=element.corners[(c+2)%3];
+                  break;
+               }
+            }
+
+            Eigen::Vector3d xi(nodes[i].x.data());
+            Eigen::Vector3d xj(nodes[j].x.data());
+            auto [e, orientation] = getEdgeIndexOrientation(i, n);
+            J += orientation * edgeJ[e] * (x - xi).normalized();
+            std::tie(e,orientation) = getEdgeIndexOrientation(j,n);
+            J += orientation * edgeJ[e] * (x - xj).normalized();
+
+            numEdges += 2; // Note we have now double-counted the edges. But that's fine, we just divide by 2.
+         }
+         J/=numEdges;
+         J/=A;
+
+         Real MLT = atan2(x[1], x[0]) * 12 / M_PI + 12;
+         Real rotJ = nodes[n].parameters[ionosphereParameters::SOURCE];
+
+         // Lookup tables for fitting coefficients (note: MLT is in hours)
+         // Uncorrected model
+          auto c4P = [](Real MLT, Real jsign) {
+            const Real values[] = {
+               1.344, // 0
+               1.161, // 3
+               0.808, // 6
+               0.640, // 9
+               1.308, // 12
+               0.439, // 15
+               0.294, // 18
+               0.815, // 21
+            };
+
+            int sector = MLT * 8. / 24.;
+            Real interpolant = MLT * 8. / 24. - sector;
+            return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+         };
+         auto c5P = [](Real MLT, Real jsign) {
+            const Real values[] = {
+               0.318, // 0
+               0.332, // 3
+               0.417, // 6
+               0.384, // 9
+               0.118, // 12
+               0.401, // 15
+               0.542, // 18
+               0.423, // 21
+            };
+
+            int sector = MLT * 8. / 24.;
+            Real interpolant = MLT * 8. / 24. - sector;
+            return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+         };
+         auto c4H = [](Real MLT, Real jsign) {
+            const Real values[] = {
+               1.150, // 0
+               1.347, // 3
+               2.150, // 6
+               2.153, // 9
+               1.627, // 12
+               0.637, // 15
+               0.238, // 18
+               0.670, // 21
+            };
+
+            int sector = MLT * 8. / 24.;
+            Real interpolant = MLT * 8. / 24. - sector;
+            return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+         };
+         auto c5H = [](Real MLT, Real jsign) {
+            const Real values[] = {
+               0.473, // 0
+               0.441, // 3
+               0.402, // 6
+               0.358, // 9
+               0.319, // 12
+               0.361, // 15
+               0.627, // 18
+               0.573, // 21
+            };
+
+            int sector = MLT * 8. / 24.;
+            Real interpolant = MLT * 8. / 24. - sector;
+            return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+         };
+
+         // Modified model
+         //auto c4P = [](Real MLT, Real jsign) {
+         //   const Real valuesPlus[] = {
+         //      1.344, 1.161, 0.808, 0.640, 1.308, 0.439, 0.294, 0.815
+         //   };
+         //   const Real valuesMinus[] = {
+         //      0.753, 0.690, 0.627, 0.564, 0.501, 0.439, 0.294, 0.815
+         //   };
+         //   int sector = MLT * 8. / 24.;
+         //   Real interpolant = MLT * 8. / 24. - sector;
+         //   if(jsign > 0) {
+         //      return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
+         //   } else {
+         //      return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
+         //   }
+         //};
+         //auto c5P = [](Real MLT, Real jsign) {
+         //   const Real valuesPlus[] = {
+         //      0.318, 0.332, 0.417, 0.384, 0.118, 0.401, 0.542, 0.423
+         //   };
+         //   const Real valuesMinus[] = {
+         //      0.420, 0.416, 0.412, 0.408, 0.405, 0.401, 0.542, 0.423
+         //   };
+         //   int sector = MLT * 8. / 24.;
+         //   Real interpolant = MLT * 8. / 24. - sector;
+         //   if(jsign > 0) {
+         //      return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
+         //   } else {
+         //      return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
+         //   }
+         //};
+         //auto c4H = [](Real MLT, Real jsign) {
+         //   const Real valuesPlus[] = {
+         //      1.150, 1.347, 2.150, 2.153, 1.627, 0.637, 0.238, 0.670
+         //   };
+         //   const Real valuesMinus[] = {
+         //      0.665, 0.659, 0.654, 0.648, 0.643, 0.637, 0.238, 0.670
+         //   };
+         //   int sector = MLT * 8. / 24.;
+         //   Real interpolant = MLT * 8. / 24. - sector;
+         //   if(jsign > 0) {
+         //      return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
+         //   } else {
+         //      return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
+         //   }
+         //};
+         //auto c5H = [](Real MLT, Real jsign) {
+         //   const Real valuesPlus[] = {
+         //      0.473, 0.441, 0.402, 0.358, 0.319, 0.361, 0.627, 0.573
+         //   };
+         //   const Real valuesMinus[] = {
+         //      0.538, 0.502, 0.467, 0.431, 0.396, 0.361, 0.627, 0.573
+         //   };
+         //   int sector = MLT * 8. / 24.;
+         //   Real interpolant = MLT * 8. / 24. - sector;
+         //   if(jsign > 0) {
+         //      return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
+         //   } else {
+         //      return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
+         //   }
+         //};
+
+         // Formula 33 from Juusola et al 2025
+         // (in A/km)
+         J *= 1000;
+         Real SigmaH = c4H(MLT,rotJ) * pow(J.norm(), c5H(MLT,rotJ));
+         Real SigmaP = c4P(MLT,rotJ) * pow(J.norm(), c5P(MLT,rotJ));
+
+         // Also add solar contribution
+         // Solar incidence parameter for calculating UV ionisation on the dayside
+         Real coschi = x[0] / Ionosphere::innerRadius;
+         if(coschi < 0) {
+            coschi = 0;
+         }
+         const Real c1p = 0.585;
+         const Real c2p = 0.582;
+         const Real c3p = 0.267;
+         const Real c1h = 1.854;
+         const Real c2h = 0.409;
+         const Real c3h = 0.353;
+         const Real F10_7 = 100;
+         Real sigmaP_dayside = c1p * pow(F10_7, c2p) * pow(coschi*coschi, c3p);
+         Real sigmaH_dayside = c1h * pow(F10_7, c2h) * pow(coschi*coschi, c3h);
+
+         nodes[n].parameters[ionosphereParameters::SIGMAP] = sqrt(SigmaP*SigmaP + sigmaP_dayside*sigmaP_dayside);
+         nodes[n].parameters[ionosphereParameters::SIGMAH] = sqrt(SigmaH*SigmaH + sigmaH_dayside*sigmaH_dayside);
+
+         // TODO: We could instead directly calculate element conductivities using Whitney forms
+         // and don't need to go via sigma averaging here.
+         static const char epsilon[3][3][3] = {
+            {{0,0,0},{0,0,1},{0,-1,0}},
+            {{0,0,-1},{0,0,0},{1,0,0}},
+            {{0,1,0},{-1,0,0},{0,0,0}}
+         };
+
+         Eigen::Vector3d b = x.normalized();
+         if(x[2] >= 0) {
+            b *= -1;
+         }
+         for(int i=0; i<3; i++) {
+            for(int j=0; j<3; j++) {
+               nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] = SigmaP * (((i==j)? 1. : 0.) - b[i]*b[j]);
+               for(int k=0; k<3; k++) {
+                  nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] -= SigmaH * epsilon[i][j][k]*b[k];
+               }
+            }
+         }
+      }
+
+   } else {
+      cerr << "Conductivity tensor " << sigmaString << " not implemented!" << endl;
+      return 1;
+   }
 
    // Write solver dependency matrix.
    if(writeSolverMtarix) {
@@ -675,6 +881,8 @@ int main(int argc, char** argv) {
          cout << "--- SOLVER DEPENDENCY MATRIX WRITTEN TO solverMatrix.txt ---" << endl;
       }
    }
+
+   ionosphereGrid.initSolver(true);
 
    // Try to solve the system.
    ionosphereGrid.isCouplingInwards=true;
@@ -816,6 +1024,26 @@ int main(int argc, char** argv) {
 
          return retval;
    }));
+   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_sigmah", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+
+         std::vector<Real> retval(grid.nodes.size());
+
+         for(uint i=0; i<grid.nodes.size(); i++) {
+            retval[i] = grid.nodes[i].parameters[ionosphereParameters::SIGMAH];
+         }
+
+         return retval;
+   }));
+   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_sigmap", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+
+         std::vector<Real> retval(grid.nodes.size());
+
+         for(uint i=0; i<grid.nodes.size(); i++) {
+            retval[i] = grid.nodes[i].parameters[ionosphereParameters::SIGMAP];
+         }
+
+         return retval;
+   }));
    if(runCurlJSolver) {
       outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromCurlJ", [&edgeJ, &edgeIndex, &edgeLength](
                   SBC::SphericalTriGrid& grid)->std::vector<Real> {
@@ -835,7 +1063,6 @@ int main(int argc, char** argv) {
             Eigen::Vector3d r1(grid.nodes[corners[1]].x.data());
             Eigen::Vector3d r2(grid.nodes[corners[2]].x.data());
 
-            Eigen::Vector3d normal = (r1-r0).cross(r2-r0).normalized();
             Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
 
             // Barycentric coordinates
@@ -865,13 +1092,59 @@ int main(int argc, char** argv) {
               return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
             };
 
-            Eigen::Vector3d j = o1*edgeLength[e1]*edgeJ[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJ[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJ[e3] *w3(barycentre);
+            Eigen::Vector3d j = sqrt(A) * (o1*edgeLength[e1]*edgeJ[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJ[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJ[e3] *w3(barycentre));
             for(int n=0; n<3; n++) {
                retval[3*i + n] = j[n];
             }
          }
 
          return retval;
+      }));
+
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_jFromCurlJNode", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+
+            std::vector<Real> retval(3*grid.nodes.size());
+
+            for(uint n=0; n<grid.nodes.size(); n++) {
+               Eigen::Vector3d J(0,0,0);
+               Real A = 0;
+
+               int numEdges = 0;
+               Eigen::Vector3d x(nodes[n].x.data());
+
+               // Sum all incoming edges
+               for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
+                  SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[el]];
+                  A += ionosphereGrid.elementArea(el);
+
+                  // Find the two other nodes on this element
+                  int i=0,j=0;
+                  for(int c=0; c< 3; c++) {
+                     if(element.corners[c] == n) {
+                        i=element.corners[(c+1)%3];
+                        j=element.corners[(c+2)%3];
+                        break;
+                     }
+                  }
+
+                  Eigen::Vector3d xi(nodes[i].x.data());
+                  Eigen::Vector3d xj(nodes[j].x.data());
+                  auto [e, orientation] = getEdgeIndexOrientation(i, n);
+                  J += orientation * edgeJ[e] * (x - xi).normalized();
+                  std::tie(e,orientation) = getEdgeIndexOrientation(j,n);
+                  J += orientation * edgeJ[e] * (x - xj).normalized();
+
+                  numEdges += 2; // Note we have now double-counted the edges. But that's fine, we just divide by 2.
+               }
+               J/=numEdges;
+               J/=A;
+
+               retval[3*n] = J[0];
+               retval[3*n+1] = J[1];
+               retval[3*n+2] = J[2];
+            }
+
+            return retval;
       }));
    }
 
