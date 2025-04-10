@@ -91,7 +91,8 @@ void assignConductivityTensorFromLoadedData(std::vector<SphericalTriGrid::Node>&
    }
 }
 
-std::vector<Real> edgeJ;
+std::vector<Real> edgeJCurl;
+std::vector<Real> edgeJDiv;
 std::vector<Real> edgeLength;
 OpenBucketHashtable<uint64_t, uint> edgeIndex;
 
@@ -118,8 +119,9 @@ std::tuple<uint,int> getEdgeIndexOrientation(uint32_t a, uint32_t b)  {
 
    if(edgeIndex.count(hash) == 0) {
       // Add entry into array
-      edgeIndex[hash] = edgeJ.size();
-      edgeJ.push_back(0.);
+      edgeIndex[hash] = edgeJCurl.size();
+      edgeJCurl.push_back(0.);
+      edgeJDiv.push_back(0.);
       edgeLength.push_back(0.);
    }
 
@@ -514,15 +516,17 @@ int main(int argc, char** argv) {
       }
 
       // Eigen vector and matrix for solving
-      Eigen::VectorXd vJ(edgeJ.size());
-      Eigen::VectorXd vRHS(nodes.size() + ionosphereGrid.elements.size() + 1);
-      Eigen::SparseMatrix<Real> curlSolverMatrix(nodes.size() + ionosphereGrid.elements.size() + 1, edgeJ.size());
+      Eigen::VectorXd vJ(edgeJCurl.size());
+      Eigen::VectorXd vRHS1(nodes.size() + ionosphereGrid.elements.size() + 1); // Right hand side for divergence-free system
+      Eigen::VectorXd vRHS2(nodes.size() + ionosphereGrid.elements.size() + 1); // Right hand side for curl-free system
+      Eigen::SparseMatrix<Real> curlSolverMatrix(nodes.size() + ionosphereGrid.elements.size() + 1, edgeJCurl.size());
 
       // Divergence constraints
       for(uint m=0; m<nodes.size(); m++) {
 
          // Divergence
-         vRHS[m] = 0;// ionosphereGrid.nodes[m].parameters[ionosphereParameters::SOURCE];
+         vRHS1[m] = 0;
+         vRHS2[m] = ionosphereGrid.nodes[m].parameters[ionosphereParameters::SOURCE];
          for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
             SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[m].touchingElements[el]];
 
@@ -584,9 +588,11 @@ int main(int argc, char** argv) {
          for(uint e=0; e<ionosphereGrid.nodes[k].numTouchingElements; e++) {
             A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
          }
-         vRHS[ionosphereGrid.nodes.size() + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
+         vRHS1[ionosphereGrid.nodes.size() + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
                + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
                + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
+         vRHS2[ionosphereGrid.nodes.size() + el] = 0;
+
       }
 
       // Add Harmonic constraint (by pinning a cross-equator current to zero)
@@ -597,7 +603,8 @@ int main(int argc, char** argv) {
          // Find first edge that crosses the equator
          if(nodes[node1].x[0] * nodes[node2].x[0] < 0) {
             curlSolverMatrix.insert(curlSolverMatrix.rows()-1, edgeIdx) = 1.;
-            vRHS(vRHS.size()-1) = 0.;
+            vRHS1[vRHS1.size()-1] = 0.;
+            vRHS2[vRHS2.size()-1] = 0.;
             break;
          }
       }
@@ -605,37 +612,33 @@ int main(int argc, char** argv) {
       curlSolverMatrix.makeCompressed();
 
       // Verify Euler characteristic of the mesh
-      int Chi = nodes.size() - edgeJ.size() + ionosphereGrid.elements.size();
+      int Chi = nodes.size() - edgeJCurl.size() + ionosphereGrid.elements.size();
       cout << "Mesh has an euler characteristic of " << Chi << endl;
 
       //squareSolverMatrix = curlSolverMatrix.adjoint() * curlSolverMatrix;
       //vRightHand = curlSolverMatrix.adjoint() * vFAC;
       //squareSolverMatrix.makeCompressed();
 
-      cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeJ.size() << " edges.\n";
+      cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeJCurl.size() << " edges.\n";
       //Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
       Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
       //solver.compute(squareSolverMatrix);
       //vJ = solver.solve(vRightHand);
       solver.compute(curlSolverMatrix);
-      vJ = solver.solve(vRHS);
+      vJ = solver.solve(vRHS1);
       cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
 
-      for(uint e=0; e<edgeJ.size(); e++) {
-         edgeJ[e] = vJ[e];
+      for(uint e=0; e<edgeJCurl.size(); e++) {
+         edgeJCurl[e] = vJ[e];
       }
 
-      //ofstream matrixOut("solverMatrix.txt");
-      //for(uint n=0; n<edgeJ.size(); n++) {
-      //   //for(uint m=0; m<edgeJ.size(); m++) {
-      //   //   matrixOut << squareSolverMatrix.coeffRef(n,m) << "\t";
-      //   //}
-      //   for(uint e=0; e<edgeJ.size(); e++) {
-      //      matrixOut << curlSolverMatrix.coeffRef(n,e) << "\t";
-      //   }
-      //   matrixOut << endl;
-      //}
-      //cout << "Wrote solver matrix to solverMatrix.txt.\n";
+      cout << "Solving divJ system with the same parameters" << endl;
+      vJ = solver.solve(vRHS2);
+      cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
+
+      for(uint e=0; e<edgeJDiv.size(); e++) {
+         edgeJDiv[e] = vJ[e];
+      }
 
       bool modifiedModel = (sigmaString == "curlJmodified");
 
@@ -665,9 +668,9 @@ int main(int argc, char** argv) {
             Eigen::Vector3d xi(nodes[i].x.data());
             Eigen::Vector3d xj(nodes[j].x.data());
             auto [e, orientation] = getEdgeIndexOrientation(i, n);
-            J += orientation * edgeJ[e] * (x - xi).normalized();
+            J += orientation * edgeJCurl[e] * (x - xi).normalized();
             std::tie(e,orientation) = getEdgeIndexOrientation(j,n);
-            J += orientation * edgeJ[e] * (x - xj).normalized();
+            J += orientation * edgeJCurl[e] * (x - xj).normalized();
 
             numEdges += 2; // Note we have now double-counted the edges. But that's fine, we just divide by 2.
          }
@@ -1051,7 +1054,7 @@ int main(int argc, char** argv) {
          return retval;
    }));
    if(runCurlJSolver) {
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromCurlJ", [&edgeJ, &edgeIndex, &edgeLength](
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromCurlJ", [&edgeJCurl, &edgeIndex, &edgeLength](
                   SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
          std::vector<Real> retval(grid.elements.size()*3);
@@ -1098,7 +1101,7 @@ int main(int argc, char** argv) {
               return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
             };
 
-            Eigen::Vector3d j = sqrt(A) * (o1*edgeLength[e1]*edgeJ[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJ[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJ[e3] *w3(barycentre));
+            Eigen::Vector3d j = sqrt(A) * (o1*edgeLength[e1]*edgeJCurl[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJCurl[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJCurl[e3] *w3(barycentre));
             for(int n=0; n<3; n++) {
                retval[3*i + n] = j[n];
             }
@@ -1136,9 +1139,54 @@ int main(int argc, char** argv) {
                   Eigen::Vector3d xi(nodes[i].x.data());
                   Eigen::Vector3d xj(nodes[j].x.data());
                   auto [e, orientation] = getEdgeIndexOrientation(i, n);
-                  J += orientation * edgeJ[e] * (x - xi).normalized();
+                  J += orientation * edgeJCurl[e] * (x - xi).normalized();
                   std::tie(e,orientation) = getEdgeIndexOrientation(j,n);
-                  J += orientation * edgeJ[e] * (x - xj).normalized();
+                  J += orientation * edgeJCurl[e] * (x - xj).normalized();
+
+                  numEdges += 2; // Note we have now double-counted the edges. But that's fine, we just divide by 2.
+               }
+               J/=numEdges;
+               J/=A;
+
+               retval[3*n] = J[0];
+               retval[3*n+1] = J[1];
+               retval[3*n+2] = J[2];
+            }
+
+            return retval;
+      }));
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_jFromDivJNode", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+
+            std::vector<Real> retval(3*grid.nodes.size());
+
+            for(uint n=0; n<grid.nodes.size(); n++) {
+               Eigen::Vector3d J(0,0,0);
+               Real A = 0;
+
+               int numEdges = 0;
+               Eigen::Vector3d x(nodes[n].x.data());
+
+               // Sum all incoming edges
+               for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
+                  SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[el]];
+                  A += ionosphereGrid.elementArea(el);
+
+                  // Find the two other nodes on this element
+                  int i=0,j=0;
+                  for(int c=0; c< 3; c++) {
+                     if(element.corners[c] == n) {
+                        i=element.corners[(c+1)%3];
+                        j=element.corners[(c+2)%3];
+                        break;
+                     }
+                  }
+
+                  Eigen::Vector3d xi(nodes[i].x.data());
+                  Eigen::Vector3d xj(nodes[j].x.data());
+                  auto [e, orientation] = getEdgeIndexOrientation(i, n);
+                  J += orientation * edgeJDiv[e] * (x - xi).normalized();
+                  std::tie(e,orientation) = getEdgeIndexOrientation(j,n);
+                  J += orientation * edgeJDiv[e] * (x - xj).normalized();
 
                   numEdges += 2; // Note we have now double-counted the edges. But that's fine, we just divide by 2.
                }
