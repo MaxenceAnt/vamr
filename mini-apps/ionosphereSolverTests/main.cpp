@@ -819,9 +819,92 @@ int main(int argc, char** argv) {
          Real SigmaH = c4H(MLT,rotJ) * pow(J.norm(), c5H(MLT,rotJ));
          Real SigmaP = c4P(MLT,rotJ) * pow(J.norm(), c5P(MLT,rotJ));
 
+         nodes[n].parameters[ionosphereParameters::SIGMAP] = SigmaP;
+         nodes[n].parameters[ionosphereParameters::SIGMAH] = SigmaH;
+      }
+
+      // Read open/closed boundary from input file, to adjust sigmas in the polar regions
+      vlsv::ParallelReader inVlsv;
+      inVlsv.open(inputFile,MPI_COMM_WORLD,masterProcessID);
+      readIonosphereNodeVariable(inVlsv, "ig_openclosed", ionosphereGrid, ionosphereParameters::ZPARAM); // NOTE: Abusing ZPARAM here, since the solver won't need it
+
+      // Perform distance transform on the mesh
+      // Here we have, as temporary variables:
+      // ZPARAM -> Openclosed 1/0
+      // ZZPARAM -> index of closest node (so far)
+      // OPENCLOSEDIST -> distance to boundary
+      std::cerr << "Distance transform!" << std::endl << "["; 
+      for(int n=0; n<nodes.size(); n++) {
+         if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
+            nodes[n].parameters[ionosphereParameters::ZZPARAM] = n;
+            nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = 0;
+         } else {
+            nodes[n].parameters[ionosphereParameters::ZZPARAM] = -1;
+            nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = 6371e3;
+         }
+      }
+
+      bool done=false;
+      while(!done) {
+         done = true;
+         for(int n=0; n<nodes.size(); n++) {
+            if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
+               continue; // Skip closed nodes
+            }
+            Eigen::Vector3d x(nodes[n].x.data());
+
+            for(int m=0; m<nodes[n].numTouchingElements; m++) {
+               SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[m]];
+               for(int c=0; c<3; c++) {
+                  int i = element.corners[c];
+                  if(i == n) {
+                     continue;
+                  }
+
+                  if(nodes[i].parameters[ionosphereParameters::ZPARAM] < 1.5) {
+                     // Closed nodes can be probed directly
+                     Eigen::Vector3d ox(nodes[i].x.data());
+                     Real distance = (ox - x).norm();
+                     if(distance < nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST]) {
+                        nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = distance;
+                        nodes[n].parameters[ionosphereParameters::ZZPARAM] = i;
+                        done = false;
+                     }
+                  } else {
+                     // Open nodes require inferred distance
+                     // TODO: This should actually be geodetic distance, but maybe we can afford not to care
+                     if(nodes[i].parameters[ionosphereParameters::ZZPARAM] == -1) {
+                        // This node doesn't even have a distance yet, skipping.
+                        //done = false;
+                        continue;
+                     }
+
+                     Eigen::Vector3d ox(nodes[ nodes[i].parameters[ionosphereParameters::ZZPARAM] ].x.data());
+                     Real distance = (ox - x).norm();
+                     if(distance < nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST]) {
+                        nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = distance;
+                        nodes[n].parameters[ionosphereParameters::ZZPARAM] = nodes[i].parameters[ionosphereParameters::ZZPARAM];
+                        done = false;
+                     }
+                  }
+               }
+            }
+         }
+      }
+      std::cerr << "]\nDistance transform done!" << std::endl;
+
+      #pragma omp parallel for
+      for(int n=0; n<nodes.size(); n++) {
+
+         // Adjust sigmas based on distance value
+         if(nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] > 300e3) { // TODO: Hardcoded 300km here
+            Real alpha = (nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] - 300e3) / 300e3;
+            nodes[n].parameters[ionosphereParameters::SIGMAP] *= exp(-alpha);
+            nodes[n].parameters[ionosphereParameters::SIGMAH] *= exp(-alpha);
+         }
          // Also add solar contribution
          // Solar incidence parameter for calculating UV ionisation on the dayside
-         Real coschi = x[0] / Ionosphere::innerRadius;
+         Real coschi = nodes[n].x[0] / Ionosphere::innerRadius;
          if(coschi < 0) {
             coschi = 0;
          }
@@ -835,6 +918,9 @@ int main(int argc, char** argv) {
          Real sigmaP_dayside = c1p * pow(F10_7, c2p) * pow(coschi*coschi, c3p);
          Real sigmaH_dayside = c1h * pow(F10_7, c2h) * pow(coschi*coschi, c3h);
 
+         Real SigmaP = nodes[n].parameters[ionosphereParameters::SIGMAP];
+         Real SigmaH = nodes[n].parameters[ionosphereParameters::SIGMAH];
+
          nodes[n].parameters[ionosphereParameters::SIGMAP] = sqrt(SigmaP*SigmaP + sigmaP_dayside*sigmaP_dayside);
          nodes[n].parameters[ionosphereParameters::SIGMAH] = sqrt(SigmaH*SigmaH + sigmaH_dayside*sigmaH_dayside);
 
@@ -846,8 +932,9 @@ int main(int argc, char** argv) {
             {{0,1,0},{-1,0,0},{0,0,0}}
          };
 
-         Eigen::Vector3d b = x.normalized();
-         if(x[2] >= 0) {
+         Eigen::Vector3d b(nodes[n].x.data());
+         b.normalize();
+         if(nodes[n].x[2] >= 0) {
             b *= -1;
          }
          for(int i=0; i<3; i++) {
@@ -1196,6 +1283,16 @@ int main(int argc, char** argv) {
                retval[3*n] = J[0];
                retval[3*n+1] = J[1];
                retval[3*n+2] = J[2];
+            }
+
+            return retval;
+      }));
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_openDistance", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+
+            std::vector<Real> retval(grid.nodes.size());
+
+            for(uint i=0; i<grid.nodes.size(); i++) {
+               retval[i] = nodes[i].parameters[ionosphereParameters::OPENCLOSEDIST];
             }
 
             return retval;

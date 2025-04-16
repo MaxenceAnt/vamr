@@ -1654,7 +1654,7 @@ namespace SBC {
      // Zero out parameters
      if(zeroOut) {
         for(uint n=0; n<nodes.size(); n++) {
-           for(uint p=ionosphereParameters::SOLUTION; p<ionosphereParameters::N_IONOSPHERE_PARAMETERS; p++) {
+           for(uint p=ionosphereParameters::SOLUTION; p<ionosphereParameters::N_IONOSPHERE_PARAMETERS-1; p++) {
               Node& N=nodes[n];
               N.parameters[p] = 0;
            }
@@ -1665,7 +1665,7 @@ namespace SBC {
         for(uint n=0; n<nodes.size(); n++) {
            Node& N=nodes[n];
            potentialSum += N.parameters[ionosphereParameters::SOLUTION];
-           for(uint p=ionosphereParameters::ZPARAM; p<ionosphereParameters::N_IONOSPHERE_PARAMETERS; p++) {
+           for(uint p=ionosphereParameters::ZPARAM; p<ionosphereParameters::N_IONOSPHERE_PARAMETERS-1; p++) {
               N.parameters[p] = 0;
            }
         }
