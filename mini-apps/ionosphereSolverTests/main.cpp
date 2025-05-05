@@ -687,68 +687,196 @@ int main(int argc, char** argv) {
          if(!modifiedModel) {
             c4P = [](Real MLT, Real jsign) {
                const Real values[] = {
-                  1.344, // 0
-                  1.161, // 3
-                  0.808, // 6
-                  0.640, // 9
-                  1.308, // 12
-                  0.439, // 15
-                  0.294, // 18
-                  0.815, // 21
+                  0.272, // 00
+                  0.212, // 01
+                  0.268, // 02
+                  0.357, // 03
+                  0.241, // 04
+                  0.225, // 05
+                  0.283, // 06
+                  0.621, // 07
+                  1.185, // 08
+                  1.643, // 09
+                  1.756, // 10
+                  1.562, // 11
+                  1.421, // 12
+                  1.327, // 13
+                  1.001, // 14
+                  0.959, // 15
+                  0.672, // 16
+                  0.300, // 17
+                  0.150, // 18
+                  0.241, // 19
+                  0.253, // 20
+                  0.340, // 21
+                  0.391, // 22
+                  0.413  // 23
                };
-
-               int sector = MLT * 8. / 24.;
-               Real interpolant = MLT * 8. / 24. - sector;
-               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+               int sector = MLT;
+               Real interpolant = MLT - sector;
+               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
             };
+
             c5P = [](Real MLT, Real jsign) {
                const Real values[] = {
-                  0.318, // 0
-                  0.332, // 3
-                  0.417, // 6
-                  0.384, // 9
-                  0.118, // 12
-                  0.401, // 15
-                  0.542, // 18
-                  0.423, // 21
+                  0.564, // 00
+                  0.602, // 01
+                  0.565, // 02
+                  0.507, // 03
+                  0.578, // 04
+                  0.598, // 05
+                  0.538, // 06
+                  0.338, // 07
+                  0.175, // 08
+                  0.075, // 09
+                  0.011, // 10
+                  0.000, // 11
+                  0.000, // 12
+                  0.037, // 13
+                  0.164, // 14
+                  0.222, // 15
+                  0.314, // 16
+                  0.470, // 17
+                  0.645, // 18
+                  0.581, // 19
+                  0.587, // 20
+                  0.533, // 21
+                  0.504, // 22
+                  0.498  // 23
                };
-
-               int sector = MLT * 8. / 24.;
-               Real interpolant = MLT * 8. / 24. - sector;
-               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+               int sector = MLT;
+               Real interpolant = MLT - sector;
+               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
             };
+
             c4H = [](Real MLT, Real jsign) {
                const Real values[] = {
-                  1.150, // 0
-                  1.347, // 3
-                  2.150, // 6
-                  2.153, // 9
-                  1.627, // 12
-                  0.637, // 15
-                  0.238, // 18
-                  0.670, // 21
+                  0.184, // 00
+                  0.248, // 01
+                  0.256, // 02
+                  0.343, // 03
+                  0.344, // 04
+                  0.341, // 05
+                  0.285, // 06
+                  0.676, // 07
+                  1.617, // 08
+                  2.610, // 09
+                  2.818, // 10
+                  2.962, // 11
+                  2.579, // 12
+                  2.049, // 13
+                  1.367, // 14
+                  0.701, // 15
+                  0.277, // 16
+                  0.141, // 17
+                  0.081, // 18
+                  0.172, // 19
+                  0.178, // 20
+                  0.223, // 21
+                  0.322, // 22
+                  0.373  // 23
                };
-
-               int sector = MLT * 8. / 24.;
-               Real interpolant = MLT * 8. / 24. - sector;
-               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+               int sector = MLT;
+               Real interpolant = MLT - sector;
+               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
             };
+
             c5H = [](Real MLT, Real jsign) {
                const Real values[] = {
-                  0.473, // 0
-                  0.441, // 3
-                  0.402, // 6
-                  0.358, // 9
-                  0.319, // 12
-                  0.361, // 15
-                  0.627, // 18
-                  0.573, // 21
+                  0.757, // 00
+                  0.702, // 01
+                  0.705, // 02
+                  0.649, // 03
+                  0.652, // 04
+                  0.662, // 05
+                  0.683, // 06
+                  0.453, // 07
+                  0.236, // 08
+                  0.115, // 09
+                  0.079, // 10
+                  0.042, // 11
+                  0.035, // 12
+                  0.030, // 13
+                  0.126, // 14
+                  0.306, // 15
+                  0.529, // 16
+                  0.653, // 17
+                  0.811, // 18
+                  0.710, // 19
+                  0.753, // 20
+                  0.721, // 21
+                  0.657, // 22
+                  0.635  // 23
                };
-
-               int sector = MLT * 8. / 24.;
-               Real interpolant = MLT * 8. / 24. - sector;
-               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+               int sector = MLT;
+               Real interpolant = MLT - sector;
+               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
             };
+
+            //c4P = [](Real MLT, Real jsign) {
+            //   const Real values[] = {
+            //      1.344, // 0
+            //      1.161, // 3
+            //      0.808, // 6
+            //      0.640, // 9
+            //      1.308, // 12
+            //      0.439, // 15
+            //      0.294, // 18
+            //      0.815, // 21
+            //   };
+
+            //   int sector = MLT * 8. / 24.;
+            //   Real interpolant = MLT * 8. / 24. - sector;
+            //   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+            //};
+            //c5P = [](Real MLT, Real jsign) {
+            //   const Real values[] = {
+            //      0.318, // 0
+            //      0.332, // 3
+            //      0.417, // 6
+            //      0.384, // 9
+            //      0.118, // 12
+            //      0.401, // 15
+            //      0.542, // 18
+            //      0.423, // 21
+            //   };
+
+            //   int sector = MLT * 8. / 24.;
+            //   Real interpolant = MLT * 8. / 24. - sector;
+            //   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+            //};
+            //c4H = [](Real MLT, Real jsign) {
+            //   const Real values[] = {
+            //      1.150, // 0
+            //      1.347, // 3
+            //      2.150, // 6
+            //      2.153, // 9
+            //      1.627, // 12
+            //      0.637, // 15
+            //      0.238, // 18
+            //      0.670, // 21
+            //   };
+
+            //   int sector = MLT * 8. / 24.;
+            //   Real interpolant = MLT * 8. / 24. - sector;
+            //   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+            //};
+            //c5H = [](Real MLT, Real jsign) {
+            //   const Real values[] = {
+            //      0.473, // 0
+            //      0.441, // 3
+            //      0.402, // 6
+            //      0.358, // 9
+            //      0.319, // 12
+            //      0.361, // 15
+            //      0.627, // 18
+            //      0.573, // 21
+            //   };
+
+            //   int sector = MLT * 8. / 24.;
+            //   Real interpolant = MLT * 8. / 24. - sector;
+            //   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
+            //};
          } else {
             // Modified model
             c4P = [](Real MLT, Real jsign) {
@@ -833,74 +961,79 @@ int main(int argc, char** argv) {
       // ZPARAM -> Openclosed 1/0
       // ZZPARAM -> index of closest node (so far)
       // OPENCLOSEDIST -> distance to boundary
-      std::cerr << "Distance transform!" << std::endl << "["; 
-      for(int n=0; n<nodes.size(); n++) {
-         if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
-            nodes[n].parameters[ionosphereParameters::ZZPARAM] = n;
-            nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = 0;
-         } else {
-            nodes[n].parameters[ionosphereParameters::ZZPARAM] = -1;
-            nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = 6371e3;
-         }
-      }
+      //std::cerr << "Distance transform!" << std::endl << "[";
+      //for(int n=0; n<nodes.size(); n++) {
+      //   if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
+      //      nodes[n].parameters[ionosphereParameters::ZZPARAM] = n;
+      //      nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = 0;
+      //   } else {
+      //      nodes[n].parameters[ionosphereParameters::ZZPARAM] = -1;
+      //      nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = 6371e3;
+      //   }
+      //}
 
-      bool done=false;
-      while(!done) {
-         done = true;
-         for(int n=0; n<nodes.size(); n++) {
-            if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
-               continue; // Skip closed nodes
-            }
-            Eigen::Vector3d x(nodes[n].x.data());
+      //bool done=false;
+      //while(!done) {
+      //   done = true;
+      //   for(int n=0; n<nodes.size(); n++) {
+      //      if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
+      //         continue; // Skip closed nodes
+      //      }
+      //      Eigen::Vector3d x(nodes[n].x.data());
 
-            for(int m=0; m<nodes[n].numTouchingElements; m++) {
-               SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[m]];
-               for(int c=0; c<3; c++) {
-                  int i = element.corners[c];
-                  if(i == n) {
-                     continue;
-                  }
+      //      for(int m=0; m<nodes[n].numTouchingElements; m++) {
+      //         SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[m]];
+      //         for(int c=0; c<3; c++) {
+      //            int i = element.corners[c];
+      //            if(i == n) {
+      //               continue;
+      //            }
 
-                  if(nodes[i].parameters[ionosphereParameters::ZPARAM] < 1.5) {
-                     // Closed nodes can be probed directly
-                     Eigen::Vector3d ox(nodes[i].x.data());
-                     Real distance = (ox - x).norm();
-                     if(distance < nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST]) {
-                        nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = distance;
-                        nodes[n].parameters[ionosphereParameters::ZZPARAM] = i;
-                        done = false;
-                     }
-                  } else {
-                     // Open nodes require inferred distance
-                     // TODO: This should actually be geodetic distance, but maybe we can afford not to care
-                     if(nodes[i].parameters[ionosphereParameters::ZZPARAM] == -1) {
-                        // This node doesn't even have a distance yet, skipping.
-                        //done = false;
-                        continue;
-                     }
+      //            if(nodes[i].parameters[ionosphereParameters::ZPARAM] < 1.5) {
+      //               // Closed nodes can be probed directly
+      //               Eigen::Vector3d ox(nodes[i].x.data());
+      //               Real distance = (ox - x).norm();
+      //               if(distance < nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST]) {
+      //                  nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = distance;
+      //                  nodes[n].parameters[ionosphereParameters::ZZPARAM] = i;
+      //                  done = false;
+      //               }
+      //            } else {
+      //               // Open nodes require inferred distance
+      //               // TODO: This should actually be geodetic distance, but maybe we can afford not to care
+      //               if(nodes[i].parameters[ionosphereParameters::ZZPARAM] == -1) {
+      //                  // This node doesn't even have a distance yet, skipping.
+      //                  //done = false;
+      //                  continue;
+      //               }
 
-                     Eigen::Vector3d ox(nodes[ nodes[i].parameters[ionosphereParameters::ZZPARAM] ].x.data());
-                     Real distance = (ox - x).norm();
-                     if(distance < nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST]) {
-                        nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = distance;
-                        nodes[n].parameters[ionosphereParameters::ZZPARAM] = nodes[i].parameters[ionosphereParameters::ZZPARAM];
-                        done = false;
-                     }
-                  }
-               }
-            }
-         }
-      }
-      std::cerr << "]\nDistance transform done!" << std::endl;
+      //               Eigen::Vector3d ox(nodes[ nodes[i].parameters[ionosphereParameters::ZZPARAM] ].x.data());
+      //               Real distance = (ox - x).norm();
+      //               if(distance < nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST]) {
+      //                  nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = distance;
+      //                  nodes[n].parameters[ionosphereParameters::ZZPARAM] = nodes[i].parameters[ionosphereParameters::ZZPARAM];
+      //                  done = false;
+      //               }
+      //            }
+      //         }
+      //      }
+      //   }
+      //}
+      //std::cerr << "]\nDistance transform done!" << std::endl;
 
       #pragma omp parallel for
       for(int n=0; n<nodes.size(); n++) {
 
-         // Adjust sigmas based on distance value
-         if(nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] > 300e3) { // TODO: Hardcoded 300km here
-            Real alpha = (nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] - 300e3) / 300e3;
-            nodes[n].parameters[ionosphereParameters::SIGMAP] *= exp(-alpha);
-            nodes[n].parameters[ionosphereParameters::SIGMAH] *= exp(-alpha);
+         //// Adjust sigmas based on distance value
+         //if(nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] > 300e3) { // TODO: Hardcoded 300km here
+         //   Real alpha = (nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] - 300e3) / 300e3;
+         //   nodes[n].parameters[ionosphereParameters::SIGMAP] *= exp(-alpha);
+         //   nodes[n].parameters[ionosphereParameters::SIGMAH] *= exp(-alpha);
+         //}
+         if(nodes[n].parameters[ionosphereParameters::ZPARAM] > 1.5) {
+            // Ignore polar cap conductivity.
+            nodes[n].parameters[ionosphereParameters::SIGMAP] = 0;
+            nodes[n].parameters[ionosphereParameters::SIGMAH] = 0;
          }
          // Also add solar contribution
          // Solar incidence parameter for calculating UV ionisation on the dayside
