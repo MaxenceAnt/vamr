@@ -708,9 +708,9 @@ int main(int argc, char** argv) {
          // Make sure sign is correct (as edges are oriented)
          Real clockwise = r0.dot((r1-r0).cross(r2-r1));
          if(clockwise > 0) {
-            clockwise = 1;
-         } else {
             clockwise = -1;
+         } else {
+            clockwise = 1;
          }
 
          auto [e,orientation] = getEdgeIndexOrientation(i,j);
