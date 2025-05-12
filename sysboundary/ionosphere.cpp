@@ -729,6 +729,9 @@ namespace SBC {
             case SergienkoIvanov:
                electronRange = 1.64e-5 * pow(particle_energy[e], 1.67) * (1. + 9.48e-2 * pow(particle_energy[e], -1.57));
                break;
+            case Robinson2020:
+               // We don't need to actually do anything about the atmosphere here, and can just bail out.
+               return;
             default:
                cerr << "(IONOSPHERE) Invalid value for Ionization model." << endl;
                abort();
@@ -752,6 +755,9 @@ namespace SBC {
                   lambda = SergienkoIvanovLambda(particle_energy[e]*1000., atmosphere[h].depth/electronRange);
                   rate = atmosphere[h].density / eps_ion_keV * particle_energy[e] * lambda / electronRange; // TODO: Albedo flux?
                   break;
+               case Robinson2020:
+                  // We don't need to actually do anything about the atmosphere here, and can just bail out.
+                  return;
             }
             scatteringRate[e][h] = max(0., rate); // m^-1
          }
@@ -892,44 +898,98 @@ namespace SBC {
 
          calculatePrecipitation();
 
-         //Calculate height-integrated conductivities and 3D electron density
-         // TODO: effdt > 0?
-         // (Then, ne += dt*(q - alpha*ne*abs(ne))
-         for(uint n=0; n<nodes.size(); n++) {
-            nodes[n].parameters[ionosphereParameters::SIGMAP] = 0;
-            nodes[n].parameters[ionosphereParameters::SIGMAH] = 0;
-            nodes[n].parameters[ionosphereParameters::SIGMAPARALLEL] = 0;
-            std::array<Real, numAtmosphereLevels> electronDensity;
+         if(ionizationModel != Robinson2020) {
+            //Calculate height-integrated conductivities and 3D electron density
+            // TODO: effdt > 0?
+            // (Then, ne += dt*(q - alpha*ne*abs(ne))
+            for(uint n=0; n<nodes.size(); n++) {
+               nodes[n].parameters[ionosphereParameters::SIGMAP] = 0;
+               nodes[n].parameters[ionosphereParameters::SIGMAH] = 0;
+               nodes[n].parameters[ionosphereParameters::SIGMAPARALLEL] = 0;
+               std::array<Real, numAtmosphereLevels> electronDensity;
 
-            // Note this loop counts from 1 (std::vector is zero-initialized, so electronDensity[0] = 0)
-            for(int h=1; h<numAtmosphereLevels; h++) {
-               // Calculate production rate
-               Real energy_keV = max(nodes[n].deltaPhi()/1000., productionMinAccEnergy);
+               // Note this loop counts from 1 (std::vector is zero-initialized, so electronDensity[0] = 0)
+               for(int h=1; h<numAtmosphereLevels; h++) {
+                  // Calculate production rate
+                  Real energy_keV = max(nodes[n].deltaPhi()/1000., productionMinAccEnergy);
 
-               Real ne = nodes[n].electronDensity();
-               Real electronTemp = nodes[n].electronTemperature();
-               Real temperature_keV = (physicalconstants::K_B / physicalconstants::CHARGE) / 1000. * electronTemp;
-               if(!(std::isfinite(energy_keV) && std::isfinite(temperature_keV))) {
-                  cerr << "(ionosphere) NaN or inf encountered in conductivity calculation: " << endl
-                     << "   `-> DeltaPhi     = " << nodes[n].deltaPhi()/1000. << " keV" << endl
-                     << "   `-> energy_keV   = " << energy_keV << endl
-                     << "   `-> ne           = " << ne << " m^-3" << endl
-                     << "   `-> electronTemp = " << electronTemp << " K" << endl;
+                  Real ne = nodes[n].electronDensity();
+                  Real electronTemp = nodes[n].electronTemperature();
+                  Real temperature_keV = (physicalconstants::K_B / physicalconstants::CHARGE) / 1000. * electronTemp;
+                  if(!(std::isfinite(energy_keV) && std::isfinite(temperature_keV))) {
+                     cerr << "(ionosphere) NaN or inf encountered in conductivity calculation: " << endl
+                        << "   `-> DeltaPhi     = " << nodes[n].deltaPhi()/1000. << " keV" << endl
+                        << "   `-> energy_keV   = " << energy_keV << endl
+                        << "   `-> ne           = " << ne << " m^-3" << endl
+                        << "   `-> electronTemp = " << electronTemp << " K" << endl;
+                  }
+                  Real qref = ne * lookupProductionValue(h, energy_keV, temperature_keV);
+
+                  // Get equilibrium electron density
+                  electronDensity[h] = sqrt(qref/recombAlpha);
+
+                  // Calculate conductivities
+                  Real halfdx = 1000 * 0.5 * (atmosphere[h].altitude -  atmosphere[h-1].altitude);
+                  Real halfCH = halfdx * 0.5 * (atmosphere[h-1].hallcoeff + atmosphere[h].hallcoeff);
+                  Real halfCP = halfdx * 0.5 * (atmosphere[h-1].pedersencoeff + atmosphere[h].pedersencoeff);
+                  Real halfCpara = halfdx * 0.5 * (atmosphere[h-1].parallelcoeff + atmosphere[h].parallelcoeff);
+
+                  nodes[n].parameters[ionosphereParameters::SIGMAP] += (electronDensity[h]+electronDensity[h-1]) * halfCP;
+                  nodes[n].parameters[ionosphereParameters::SIGMAH] += (electronDensity[h]+electronDensity[h-1]) * halfCH;
+                  nodes[n].parameters[ionosphereParameters::SIGMAPARALLEL] += (electronDensity[h]+electronDensity[h-1]) * halfCpara;
                }
-               Real qref = ne * lookupProductionValue(h, energy_keV, temperature_keV);
+            }
+         } else {
 
-               // Get equilibrium electron density
-               electronDensity[h] = sqrt(qref/recombAlpha);
+            // In the Robinson (2020) model, conductivity gets directly calculated from FACs.
+            // DOI: doi/10.1029/2020JA028008
+            const static std::array<Real,3> SigmaP0d_coefficients = {5., -0.8 , 60.9};
+            const static std::array<Real,3> SigmaP0u_coefficients = {4.2, 1.1 ,318.6};
+            const static std::array<Real,3> SigmaH0d_coefficients = {7.7, -1.8,139.0};
+            const static std::array<Real,3> SigmaH0u_coefficients = {8.7, 4.6 ,327.1};
 
-               // Calculate conductivities
-               Real halfdx = 1000 * 0.5 * (atmosphere[h].altitude -  atmosphere[h-1].altitude);
-               Real halfCH = halfdx * 0.5 * (atmosphere[h-1].hallcoeff + atmosphere[h].hallcoeff);
-               Real halfCP = halfdx * 0.5 * (atmosphere[h-1].pedersencoeff + atmosphere[h].pedersencoeff);
-               Real halfCpara = halfdx * 0.5 * (atmosphere[h-1].parallelcoeff + atmosphere[h].parallelcoeff);
+            const static std::array<Real,3> SigmaP1d_coefficients = {-3.2, -3.6, 21.9};
+            const static std::array<Real,3> SigmaP1u_coefficients = { 6.8, -1.5,184.9};
+            const static std::array<Real,3> SigmaH1d_coefficients = {-7.3,  5.6,100.9};
+            const static std::array<Real,3> SigmaH1u_coefficients = {14.8,-10.4,129.9};
 
-               nodes[n].parameters[ionosphereParameters::SIGMAP] += (electronDensity[h]+electronDensity[h-1]) * halfCP;
-               nodes[n].parameters[ionosphereParameters::SIGMAH] += (electronDensity[h]+electronDensity[h-1]) * halfCH;
-               nodes[n].parameters[ionosphereParameters::SIGMAPARALLEL] += (electronDensity[h]+electronDensity[h-1]) * halfCpara;
+            // MLT interpolation (eq 7 from the paper)
+            auto interpolate_robinson = [](const std::array<Real,3>& variable, Real MLT) -> Real {
+               return variable[0] + variable[1] * cos(variable[2]/180.*M_PI + MLT);
+            };
+
+            // Smooth (cubic hermite) interpolation between two curves a and b, x is clamped to [-1; 1]
+            auto smoothstep = [](Real a, Real b, Real x) -> Real {
+               x = 0.5*(x+1);
+               x = std::clamp((x-a)/(b-a),0.,1.);
+               x = x*x*(3-2*x);
+               return (1.-x)*a + x*b;
+            };
+
+            for(uint n=0; n<nodes.size(); n++) {
+
+               Real MLT = atan2(nodes[n].x[1],nodes[n].x[0]);
+
+               // Calculate FAC density through this node
+               Real area = 0;
+               for(uint e=0; e<nodes[n].numTouchingElements; e++) {
+                  area += elementArea(nodes[n].touchingElements[e]);
+               }
+               area /= 3.; // As every element has 3 corners, don't double-count areas
+
+               // The Robinson model wants FACS in microAmperes / m^2
+               Real FAC = 1e6*nodes[n].parameters[ionosphereParameters::SOURCE]/area;
+
+               // Get A, B and C factor by interpolation
+               // Note: Positive FAC value -> downwards FACs.
+               Real SigmaH0 = smoothstep(interpolate_robinson(SigmaH0u_coefficients, MLT), interpolate_robinson(SigmaH0d_coefficients, MLT), FAC/0.1);
+               Real SigmaH1 = smoothstep(interpolate_robinson(SigmaH1u_coefficients, MLT), interpolate_robinson(SigmaH1d_coefficients, MLT), FAC/0.1);
+               Real SigmaP0 = smoothstep(interpolate_robinson(SigmaP0u_coefficients, MLT), interpolate_robinson(SigmaP0d_coefficients, MLT), FAC/0.1);
+               Real SigmaP1 = smoothstep(interpolate_robinson(SigmaP1u_coefficients, MLT), interpolate_robinson(SigmaP1d_coefficients, MLT), FAC/0.1);
+
+               nodes[n].parameters[ionosphereParameters::SIGMAP] = SigmaP0 + SigmaP1 * FAC;
+               nodes[n].parameters[ionosphereParameters::SIGMAH] = SigmaH0 + SigmaH1 * FAC;
+               // TODO: What do we do about SIGMAPARALLEL?
             }
          }
       }
@@ -962,6 +1022,7 @@ namespace SBC {
             Real sigmaP_dayside = backgroundIonisation + F10_7_p_049 * (0.34 * coschi + 0.93 * sqrt(coschi));
             Real sigmaH_dayside = backgroundIonisation + F10_7_p_053 * (0.81 * coschi + 0.54 * sqrt(coschi));
 #else // Not MOEN_AND_BREKKE, but JUUSOLA2025
+      // TODO: Implement the newer newer one
             const Real c1p = 0.585;
             const Real c2p = 0.582;
             const Real c3p = 0.267;
@@ -2224,7 +2285,7 @@ namespace SBC {
       Readparameters::addComposing("ionosphere.refineMaxLatitude", "Refine the grid equatorwards of the given latitude. Multiple of these lines can be given for successive refinement, paired up with refineMinLatitude lines.");
       Readparameters::add("ionosphere.atmosphericModelFile", "Filename to read the MSIS atmosphere data from (default: NRLMSIS.dat)", std::string("NRLMSIS.dat"));
       Readparameters::add("ionosphere.recombAlpha", "Ionospheric recombination parameter (m^3/s)", 2.4e-13); // Default value from Schunck & Nagy, Table 8.5
-      Readparameters::add("ionosphere.ionizationModel", "Ionospheric electron production rate model. Options are: Rees1963, Rees1989, SergienkoIvanov (default).", std::string("SergienkoIvanov"));
+      Readparameters::add("ionosphere.ionizationModel", "Ionospheric electron production rate model. Options are: Rees1963, Rees1989, SergienkoIvanov (default), Robinson2020.", std::string("SergienkoIvanov"));
       Readparameters::add("ionosphere.innerBoundaryVDFmode", "Inner boundary VDF construction method. Options ar: FixedMoments, AverageMoments, AverageAllMoments, CopyAndLosscone.", std::string("FixedMoments"));
       Readparameters::add("ionosphere.F10_7", "Solar 10.7 cm radio flux (sfu = 10^{-22} W/m^2)", 100);
       Readparameters::add("ionosphere.backgroundIonisation", "Background ionoisation due to cosmic rays (mho)", 0.5);
@@ -2345,6 +2406,8 @@ namespace SBC {
          ionosphereGrid.ionizationModel = SphericalTriGrid::Rees1989;
       } else if(ionizationModelString == "SergienkoIvanov") {
          ionosphereGrid.ionizationModel = SphericalTriGrid::SergienkoIvanov;
+      } else if (ionizationModelString == "Robinson2020") {
+         ionosphereGrid.ionizationModel = SphericalTriGrid::Robinson2020;
       } else {
          cerr << "(IONOSPHERE) Unknown ionization production model \"" << ionizationModelString << "\". Aborting." << endl;
          abort();
