@@ -42,14 +42,14 @@ CMP = OMPI_CXX='nvcc' OMPI_CXXFLAGS='' mpic++
 # Now tell also the linker to use nvcc
 # These are found with  mpic++ --showme:link
 # The line below indeed uses OMPI_CXX, not OMPI_LD
-LNK = OMPI_CXX='nvcc' OMPI_CXXFLAGS='-arch=sm_87' OMPI_LIBS='-L/usr/lib/x86_64-linux-gnu/openmpi/lib' OMPI_LDFLAGS='-lmpi_cxx -lmpi -L/usr/local/cuda/lib64 -lcudart' mpic++
+LNK = OMPI_CXX='nvcc' OMPI_CXXFLAGS='-arch=sm_86' OMPI_LIBS='-L/usr/lib/x86_64-linux-gnu/openmpi/lib' OMPI_LDFLAGS='-lmpi_cxx -lmpi -L/usr/local/cuda/lib64 -lcudart' mpic++
 
 #-G (device debug) overrides --generate-line-info -line-info
 # but also requires more device-side resources to run
 # use "-Xptxas -v" for verbose output of ptx compilation
 
-CXXFLAGS = -g -O3 -x cu -std=c++20 -Xcompiler -std=c++20 --extended-lambda --expt-relaxed-constexpr -gencode arch=compute_87,code=sm_87 -Xcompiler -fopenmp --generate-line-info -line-info -Xcompiler="-fpermissive"  --extra-device-vectorization
-testpackage: CXXFLAGS = -g -O2 -x cu -std=c++20 -Xcompiler -std=c++20 --extended-lambda --expt-relaxed-constexpr -gencode arch=compute_87,code=sm_87 -Xcompiler -fopenmp --generate-line-info -line-info -Xcompiler="-fpermissive"
+CXXFLAGS = -g -O3 -x cu -std=c++20 -Xcompiler -std=c++20 --extended-lambda --expt-relaxed-constexpr -gencode arch=compute_86,code=sm_86 -Xcompiler -fopenmp --generate-line-info -line-info -Xcompiler="-fpermissive"  --extra-device-vectorization
+testpackage: CXXFLAGS = -g -O2 -x cu -std=c++20 -Xcompiler -std=c++20 --extended-lambda --expt-relaxed-constexpr -gencode arch=compute_86,code=sm_86 -Xcompiler -fopenmp --generate-line-info -line-info -Xcompiler="-fpermissive"
 
 MATHFLAGS = --use_fast_math
 # nvcc fast_math does not assume only finite math
