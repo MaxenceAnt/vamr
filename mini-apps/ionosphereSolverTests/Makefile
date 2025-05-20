@@ -146,3 +146,6 @@ lfmtest.dat: LFMtest.vlsv
 LFMtest: lfmtest.dat
 	./plot_LFMtest.gp
 	#./plot_ionosphereLFM.py LFMtest.vlsv
+curlJtest: main
+	 OMP_NUM_THREADS=1 ./main -N 2000 -r 40 90 -r 50 90 -r 60 80 -sigma curlJ -fac file -infile FHA_bulk501.vlsv -gaugeFix equator50 -o curlJtest.vlsv
+	 ./plot_ionosphereEigenPhi.py curlJtest.vlsv

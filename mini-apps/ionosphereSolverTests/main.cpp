@@ -39,6 +39,143 @@ void recalculateLocalCellsCache(const dccrg::Dccrg<spatial_cell::SpatialCell, dc
 SysBoundary::SysBoundary() {}
 SysBoundary::~SysBoundary() {}
 
+// Ionosoheric Sigma calculation function coefficients from
+// Juusola et al. 2025
+// Note: MLT is in hours
+const Real c1p = 0.351;
+const Real c2p = 0.697;
+const Real c3p = 0.707;
+const Real c1h = 0.720;
+const Real c2h = 0.617;
+const Real c3h = 0.846;
+std::function<Real(Real, Real)> c4P = [](Real MLT, Real jsign) {
+   const Real values[] = {
+      0.272, // 00
+      0.212, // 01
+      0.268, // 02
+      0.357, // 03
+      0.241, // 04
+      0.225, // 05
+      0.283, // 06
+      0.621, // 07
+      1.185, // 08
+      1.643, // 09
+      1.756, // 10
+      1.562, // 11
+      1.421, // 12
+      1.327, // 13
+      1.001, // 14
+      0.959, // 15
+      0.672, // 16
+      0.300, // 17
+      0.150, // 18
+      0.241, // 19
+      0.253, // 20
+      0.340, // 21
+      0.391, // 22
+      0.413  // 23
+   };
+   int sector = MLT;
+   Real interpolant = MLT - sector;
+   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
+};
+
+std::function<Real(Real, Real)> c5P = [](Real MLT, Real jsign) {
+   const Real values[] = {
+      0.564, // 00
+      0.602, // 01
+      0.565, // 02
+      0.507, // 03
+      0.578, // 04
+      0.598, // 05
+      0.538, // 06
+      0.338, // 07
+      0.175, // 08
+      0.075, // 09
+      0.011, // 10
+      0.000, // 11
+      0.000, // 12
+      0.037, // 13
+      0.164, // 14
+      0.222, // 15
+      0.314, // 16
+      0.470, // 17
+      0.645, // 18
+      0.581, // 19
+      0.587, // 20
+      0.533, // 21
+      0.504, // 22
+      0.498  // 23
+   };
+   int sector = MLT;
+   Real interpolant = MLT - sector;
+   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
+};
+
+std::function<Real(Real, Real)> c4H = [](Real MLT, Real jsign) {
+   const Real values[] = {
+      0.184, // 00
+      0.248, // 01
+      0.256, // 02
+      0.343, // 03
+      0.344, // 04
+      0.341, // 05
+      0.285, // 06
+      0.676, // 07
+      1.617, // 08
+      2.610, // 09
+      2.818, // 10
+      2.962, // 11
+      2.579, // 12
+      2.049, // 13
+      1.367, // 14
+      0.701, // 15
+      0.277, // 16
+      0.141, // 17
+      0.081, // 18
+      0.172, // 19
+      0.178, // 20
+      0.223, // 21
+      0.322, // 22
+      0.373  // 23
+   };
+   int sector = MLT;
+   Real interpolant = MLT - sector;
+   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
+};
+
+std::function<Real(Real, Real)> c5H = [](Real MLT, Real jsign) {
+   const Real values[] = {
+      0.757, // 00
+      0.702, // 01
+      0.705, // 02
+      0.649, // 03
+      0.652, // 04
+      0.662, // 05
+      0.683, // 06
+      0.453, // 07
+      0.236, // 08
+      0.115, // 09
+      0.079, // 10
+      0.042, // 11
+      0.035, // 12
+      0.030, // 13
+      0.126, // 14
+      0.306, // 15
+      0.529, // 16
+      0.653, // 17
+      0.811, // 18
+      0.710, // 19
+      0.753, // 20
+      0.721, // 21
+      0.657, // 22
+      0.635  // 23
+   };
+   int sector = MLT;
+   Real interpolant = MLT - sector;
+   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
+};
+
 // Tabulated chapman function for atmospheric absorption of EUV values, from Laundal et al. 2024
 const static Real chapman_euv_table[1201] = {
    1.00000e+00, 9.99998e-01, 9.99994e-01, 9.99986e-01, 9.99976e-01, 9.99962e-01, 9.99946e-01, 9.99926e-01, 9.99904e-01, 9.99878e-01,
@@ -570,6 +707,12 @@ int main(int argc, char** argv) {
          area /= 3.; // As every element has 3 corners, don't double-count areas
          ionosphereGrid.nodes[i].parameters[ionosphereParameters::SOURCE] *= area;
       }
+      // Also read open/closed information from the file, if it exists.
+      // (We use PPARAM as temporary storage here)
+      readIonosphereNodeVariable(inVlsv, "ig_openclosed", ionosphereGrid, ionosphereParameters::PPARAM);
+      for(uint i=0; i<ionosphereGrid.nodes.size(); i++) {
+         ionosphereGrid.nodes[i].openFieldLine = ionosphereGrid.nodes[i].parameters[ionosphereParameters::PPARAM];
+      }
    } else if(facString == "pole") {
       for(uint i=0; i<ionosphereGrid.nodes.size(); i++) {
          if(ionosphereGrid.nodes[i].x[2] >= Ionosphere::innerRadius * 0.95) {
@@ -636,10 +779,14 @@ int main(int argc, char** argv) {
          Real sigmaP=20.;
          Real sigmaH=100.;
          assignConductivityTensor(nodes, sigmaP, sigmaH);
-   } else if(sigmaString == "curlJ" || sigmaString == "curlJmodified") {
+   } else if(sigmaString == "curlJ") {
       runCurlJSolver = true;
 
-      // First, solve divergence-free inplane current system
+      // First, solve curl-free inplane current system.
+      // Use those currents to estimate sigma ratio.
+      // Then, solve divergence-free part.
+      // Ginally, estimate Sigmas.
+
       // Fill edge arrays
       for(uint32_t el=0; el< ionosphereGrid.elements.size(); el++) {
          SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
@@ -733,9 +880,14 @@ int main(int argc, char** argv) {
          for(uint e=0; e<ionosphereGrid.nodes[k].numTouchingElements; e++) {
             A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
          }
+
+         // NOTE: this is *not* yet the final right-hand side for the
+         // divergence-free part here yet, as its values depend on the
+         // solution of the curl-free part. Correction happens further
+         // down.
          vRHS1[ionosphereGrid.nodes.size() + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
-               + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
-               + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
+              + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
+              + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
          vRHS2[ionosphereGrid.nodes.size() + el] = 0;
 
       }
@@ -760,24 +912,10 @@ int main(int argc, char** argv) {
       int Chi = nodes.size() - edgeJCurl.size() + ionosphereGrid.elements.size();
       cout << "Mesh has an euler characteristic of " << Chi << endl;
 
-      //squareSolverMatrix = curlSolverMatrix.adjoint() * curlSolverMatrix;
-      //vRightHand = curlSolverMatrix.adjoint() * vFAC;
-      //squareSolverMatrix.makeCompressed();
-
-      cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeJCurl.size() << " edges.\n";
-      //Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
+      // Solve curl-free currents.
+      cout << "Solving divJ system" << endl;
       Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
-      //solver.compute(squareSolverMatrix);
-      //vJ = solver.solve(vRightHand);
       solver.compute(curlSolverMatrix);
-      vJ = solver.solve(vRHS1);
-      cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
-
-      for(uint e=0; e<edgeJCurl.size(); e++) {
-         edgeJCurl[e] = vJ[e];
-      }
-
-      cout << "Solving divJ system with the same parameters" << endl;
       vJ = solver.solve(vRHS2);
       cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
 
@@ -785,7 +923,67 @@ int main(int argc, char** argv) {
          edgeJDiv[e] = vJ[e];
       }
 
-      bool modifiedModel = (sigmaString == "curlJmodified");
+      // Interpolate edge-localized J_CF to elements
+      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+         // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
+         std::array<uint32_t, 3>& corners = ionosphereGrid.elements[el].corners;
+         Real A = ionosphereGrid.elementArea(el);
+
+         auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
+         auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
+         auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
+
+         Eigen::Vector3d r0(ionosphereGrid.nodes[corners[0]].x.data());
+         Eigen::Vector3d r1(ionosphereGrid.nodes[corners[1]].x.data());
+         Eigen::Vector3d r2(ionosphereGrid.nodes[corners[2]].x.data());
+
+         Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
+
+         // Barycentric coordinates
+         auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+            return ((r0-p).cross(r1-p)).norm() / (2*A);
+         };
+         auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+            return ((r1-p).cross(r2-p)).norm() / (2*A);
+         };
+         auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+            return ((r2-p).cross(r0-p)).norm() / (2*A);
+         };
+
+         // Barycentric gradients (these are constant per element)
+         Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
+         Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
+         Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
+
+         // Whitney 1-form basis functions
+         auto w1 = [&](const Eigen::Vector3d& p) {
+            return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
+         };
+         auto w2 = [&](const Eigen::Vector3d& p) {
+            return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
+         };
+         auto w3 = [&](const Eigen::Vector3d& p) {
+            return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
+         };
+
+         // Effective curl-free current in this element
+         Eigen::Vector3d j_cf = sqrt(A) * (o1*edgeLength[e1]*edgeJDiv[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJDiv[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJDiv[e3] *w3(barycentre));
+
+         Real MLT = atan2(barycentre[1], barycentre[0]) * 12 / M_PI + 12;
+
+         Real correction = pow(c4H(MLT,1)/c4P(MLT,1) * 1000*j_cf.norm(),1./(1.+c5P(MLT,1)-c5H(MLT,1))) / (1000*j_cf.norm());
+         vRHS1[ionosphereGrid.nodes.size() + el] *= correction;
+      }
+
+      cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeJCurl.size() << " edges.\n";
+      //solver.compute(squareSolverMatrix);
+      //vJ = solver.solve(vRightHand);
+      vJ = solver.solve(vRHS1);
+      cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
+
+      for(uint e=0; e<edgeJCurl.size(); e++) {
+         edgeJCurl[e] = vJ[e];
+      }
 
       // Next, evaluate Sigma as a function of inplane-J and MLT
       #pragma omp parallel for
@@ -825,267 +1023,6 @@ int main(int argc, char** argv) {
          Real MLT = atan2(x[1], x[0]) * 12 / M_PI + 12;
          Real rotJ = nodes[n].parameters[ionosphereParameters::SOURCE];
 
-         // Lookup tables for fitting coefficients (note: MLT is in hours)
-         std::function<Real(Real, Real)> c4P, c4H;
-         std::function<Real(Real, Real)> c5P, c5H;
-         // Uncorrected model
-         if(!modifiedModel) {
-            c4P = [](Real MLT, Real jsign) {
-               const Real values[] = {
-                  0.272, // 00
-                  0.212, // 01
-                  0.268, // 02
-                  0.357, // 03
-                  0.241, // 04
-                  0.225, // 05
-                  0.283, // 06
-                  0.621, // 07
-                  1.185, // 08
-                  1.643, // 09
-                  1.756, // 10
-                  1.562, // 11
-                  1.421, // 12
-                  1.327, // 13
-                  1.001, // 14
-                  0.959, // 15
-                  0.672, // 16
-                  0.300, // 17
-                  0.150, // 18
-                  0.241, // 19
-                  0.253, // 20
-                  0.340, // 21
-                  0.391, // 22
-                  0.413  // 23
-               };
-               int sector = MLT;
-               Real interpolant = MLT - sector;
-               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
-            };
-
-            c5P = [](Real MLT, Real jsign) {
-               const Real values[] = {
-                  0.564, // 00
-                  0.602, // 01
-                  0.565, // 02
-                  0.507, // 03
-                  0.578, // 04
-                  0.598, // 05
-                  0.538, // 06
-                  0.338, // 07
-                  0.175, // 08
-                  0.075, // 09
-                  0.011, // 10
-                  0.000, // 11
-                  0.000, // 12
-                  0.037, // 13
-                  0.164, // 14
-                  0.222, // 15
-                  0.314, // 16
-                  0.470, // 17
-                  0.645, // 18
-                  0.581, // 19
-                  0.587, // 20
-                  0.533, // 21
-                  0.504, // 22
-                  0.498  // 23
-               };
-               int sector = MLT;
-               Real interpolant = MLT - sector;
-               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
-            };
-
-            c4H = [](Real MLT, Real jsign) {
-               const Real values[] = {
-                  0.184, // 00
-                  0.248, // 01
-                  0.256, // 02
-                  0.343, // 03
-                  0.344, // 04
-                  0.341, // 05
-                  0.285, // 06
-                  0.676, // 07
-                  1.617, // 08
-                  2.610, // 09
-                  2.818, // 10
-                  2.962, // 11
-                  2.579, // 12
-                  2.049, // 13
-                  1.367, // 14
-                  0.701, // 15
-                  0.277, // 16
-                  0.141, // 17
-                  0.081, // 18
-                  0.172, // 19
-                  0.178, // 20
-                  0.223, // 21
-                  0.322, // 22
-                  0.373  // 23
-               };
-               int sector = MLT;
-               Real interpolant = MLT - sector;
-               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
-            };
-
-            c5H = [](Real MLT, Real jsign) {
-               const Real values[] = {
-                  0.757, // 00
-                  0.702, // 01
-                  0.705, // 02
-                  0.649, // 03
-                  0.652, // 04
-                  0.662, // 05
-                  0.683, // 06
-                  0.453, // 07
-                  0.236, // 08
-                  0.115, // 09
-                  0.079, // 10
-                  0.042, // 11
-                  0.035, // 12
-                  0.030, // 13
-                  0.126, // 14
-                  0.306, // 15
-                  0.529, // 16
-                  0.653, // 17
-                  0.811, // 18
-                  0.710, // 19
-                  0.753, // 20
-                  0.721, // 21
-                  0.657, // 22
-                  0.635  // 23
-               };
-               int sector = MLT;
-               Real interpolant = MLT - sector;
-               return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%24];
-            };
-
-            //c4P = [](Real MLT, Real jsign) {
-            //   const Real values[] = {
-            //      1.344, // 0
-            //      1.161, // 3
-            //      0.808, // 6
-            //      0.640, // 9
-            //      1.308, // 12
-            //      0.439, // 15
-            //      0.294, // 18
-            //      0.815, // 21
-            //   };
-
-            //   int sector = MLT * 8. / 24.;
-            //   Real interpolant = MLT * 8. / 24. - sector;
-            //   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
-            //};
-            //c5P = [](Real MLT, Real jsign) {
-            //   const Real values[] = {
-            //      0.318, // 0
-            //      0.332, // 3
-            //      0.417, // 6
-            //      0.384, // 9
-            //      0.118, // 12
-            //      0.401, // 15
-            //      0.542, // 18
-            //      0.423, // 21
-            //   };
-
-            //   int sector = MLT * 8. / 24.;
-            //   Real interpolant = MLT * 8. / 24. - sector;
-            //   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
-            //};
-            //c4H = [](Real MLT, Real jsign) {
-            //   const Real values[] = {
-            //      1.150, // 0
-            //      1.347, // 3
-            //      2.150, // 6
-            //      2.153, // 9
-            //      1.627, // 12
-            //      0.637, // 15
-            //      0.238, // 18
-            //      0.670, // 21
-            //   };
-
-            //   int sector = MLT * 8. / 24.;
-            //   Real interpolant = MLT * 8. / 24. - sector;
-            //   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
-            //};
-            //c5H = [](Real MLT, Real jsign) {
-            //   const Real values[] = {
-            //      0.473, // 0
-            //      0.441, // 3
-            //      0.402, // 6
-            //      0.358, // 9
-            //      0.319, // 12
-            //      0.361, // 15
-            //      0.627, // 18
-            //      0.573, // 21
-            //   };
-
-            //   int sector = MLT * 8. / 24.;
-            //   Real interpolant = MLT * 8. / 24. - sector;
-            //   return (1.-interpolant)*values[sector] + interpolant * values[(sector+1)%8];
-            //};
-         } else {
-            // Modified model
-            c4P = [](Real MLT, Real jsign) {
-               const Real valuesPlus[] = {
-                  1.344, 1.161, 0.808, 0.640, 1.308, 0.439, 0.294, 0.815
-               };
-               const Real valuesMinus[] = {
-                  0.753, 0.690, 0.627, 0.564, 0.501, 0.439, 0.294, 0.815
-               };
-               int sector = MLT * 8. / 24.;
-               Real interpolant = MLT * 8. / 24. - sector;
-               if(jsign > 0) {
-                  return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
-               } else {
-                  return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
-               }
-            };
-            c5P = [](Real MLT, Real jsign) {
-               const Real valuesPlus[] = {
-                  0.318, 0.332, 0.417, 0.384, 0.118, 0.401, 0.542, 0.423
-               };
-               const Real valuesMinus[] = {
-                  0.420, 0.416, 0.412, 0.408, 0.405, 0.401, 0.542, 0.423
-               };
-               int sector = MLT * 8. / 24.;
-               Real interpolant = MLT * 8. / 24. - sector;
-               if(jsign > 0) {
-                  return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
-               } else {
-                  return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
-               }
-            };
-            c4H = [](Real MLT, Real jsign) {
-               const Real valuesPlus[] = {
-                  1.150, 1.347, 2.150, 2.153, 1.627, 0.637, 0.238, 0.670
-               };
-               const Real valuesMinus[] = {
-                  0.665, 0.659, 0.654, 0.648, 0.643, 0.637, 0.238, 0.670
-               };
-               int sector = MLT * 8. / 24.;
-               Real interpolant = MLT * 8. / 24. - sector;
-               if(jsign > 0) {
-                  return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
-               } else {
-                  return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
-               }
-            };
-            c5H = [](Real MLT, Real jsign) {
-               const Real valuesPlus[] = {
-                  0.473, 0.441, 0.402, 0.358, 0.319, 0.361, 0.627, 0.573
-               };
-               const Real valuesMinus[] = {
-                  0.538, 0.502, 0.467, 0.431, 0.396, 0.361, 0.627, 0.573
-               };
-               int sector = MLT * 8. / 24.;
-               Real interpolant = MLT * 8. / 24. - sector;
-               if(jsign > 0) {
-                  return (1.-interpolant)*valuesPlus[sector] + interpolant * valuesPlus[(sector+1)%8];
-               } else {
-                  return (1.-interpolant)*valuesMinus[sector] + interpolant * valuesMinus[(sector+1)%8];
-               }
-            };
-         }
-
          // Formula 33 from Juusola et al 2025
          // (in A/km)
          J *= 1000;
@@ -1096,86 +1033,10 @@ int main(int argc, char** argv) {
          nodes[n].parameters[ionosphereParameters::SIGMAH] = SigmaH;
       }
 
-      // Read open/closed boundary from input file, to adjust sigmas in the polar regions
-      vlsv::ParallelReader inVlsv;
-      inVlsv.open(inputFile,MPI_COMM_WORLD,masterProcessID);
-      readIonosphereNodeVariable(inVlsv, "ig_openclosed", ionosphereGrid, ionosphereParameters::ZPARAM); // NOTE: Abusing ZPARAM here, since the solver won't need it
-
-      // Perform distance transform on the mesh
-      // Here we have, as temporary variables:
-      // ZPARAM -> Openclosed 1/0
-      // ZZPARAM -> index of closest node (so far)
-      // OPENCLOSEDIST -> distance to boundary
-      //std::cerr << "Distance transform!" << std::endl << "[";
-      //for(int n=0; n<nodes.size(); n++) {
-      //   if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
-      //      nodes[n].parameters[ionosphereParameters::ZZPARAM] = n;
-      //      nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = 0;
-      //   } else {
-      //      nodes[n].parameters[ionosphereParameters::ZZPARAM] = -1;
-      //      nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = 6371e3;
-      //   }
-      //}
-
-      //bool done=false;
-      //while(!done) {
-      //   done = true;
-      //   for(int n=0; n<nodes.size(); n++) {
-      //      if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
-      //         continue; // Skip closed nodes
-      //      }
-      //      Eigen::Vector3d x(nodes[n].x.data());
-
-      //      for(int m=0; m<nodes[n].numTouchingElements; m++) {
-      //         SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[m]];
-      //         for(int c=0; c<3; c++) {
-      //            int i = element.corners[c];
-      //            if(i == n) {
-      //               continue;
-      //            }
-
-      //            if(nodes[i].parameters[ionosphereParameters::ZPARAM] < 1.5) {
-      //               // Closed nodes can be probed directly
-      //               Eigen::Vector3d ox(nodes[i].x.data());
-      //               Real distance = (ox - x).norm();
-      //               if(distance < nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST]) {
-      //                  nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = distance;
-      //                  nodes[n].parameters[ionosphereParameters::ZZPARAM] = i;
-      //                  done = false;
-      //               }
-      //            } else {
-      //               // Open nodes require inferred distance
-      //               // TODO: This should actually be geodetic distance, but maybe we can afford not to care
-      //               if(nodes[i].parameters[ionosphereParameters::ZZPARAM] == -1) {
-      //                  // This node doesn't even have a distance yet, skipping.
-      //                  //done = false;
-      //                  continue;
-      //               }
-
-      //               Eigen::Vector3d ox(nodes[ nodes[i].parameters[ionosphereParameters::ZZPARAM] ].x.data());
-      //               Real distance = (ox - x).norm();
-      //               if(distance < nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST]) {
-      //                  nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] = distance;
-      //                  nodes[n].parameters[ionosphereParameters::ZZPARAM] = nodes[i].parameters[ionosphereParameters::ZZPARAM];
-      //                  done = false;
-      //               }
-      //            }
-      //         }
-      //      }
-      //   }
-      //}
-      //std::cerr << "]\nDistance transform done!" << std::endl;
-
       #pragma omp parallel for
-      for(int n=0; n<nodes.size(); n++) {
+      for(uint n=0; n<nodes.size(); n++) {
 
-         //// Adjust sigmas based on distance value
-         //if(nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] > 300e3) { // TODO: Hardcoded 300km here
-         //   Real alpha = (nodes[n].parameters[ionosphereParameters::OPENCLOSEDIST] - 300e3) / 300e3;
-         //   nodes[n].parameters[ionosphereParameters::SIGMAP] *= exp(-alpha);
-         //   nodes[n].parameters[ionosphereParameters::SIGMAH] *= exp(-alpha);
-         //}
-         if(nodes[n].parameters[ionosphereParameters::ZPARAM] > 1.5) {
+         if(nodes[n].openFieldLine > 0.5) {
             // Ignore polar cap conductivity.
             nodes[n].parameters[ionosphereParameters::SIGMAP] = 0;
             nodes[n].parameters[ionosphereParameters::SIGMAH] = 0;
@@ -1188,12 +1049,6 @@ int main(int argc, char** argv) {
          //if(coschi < 0) {
          //   coschi = 0;
          //}
-         const Real c1p = 0.351;
-         const Real c2p = 0.697;
-         const Real c3p = 0.707;
-         const Real c1h = 0.720;
-         const Real c2h = 0.617;
-         const Real c3h = 0.846;
          const Real F10_7 = 100;
          Real sigmaP_dayside = c1p * pow(F10_7, c2p) * pow(qprime, c3p);
          Real sigmaH_dayside = c1h * pow(F10_7, c2h) * pow(qprime, c3h);
@@ -1366,6 +1221,15 @@ int main(int argc, char** argv) {
 
          for (uint i = 0; i < grid.nodes.size(); i++) {
             retval[i] = grid.nodes[i].parameters[ionosphereParameters::SOURCE];
+         }
+
+         return retval;
+   }));
+   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_openclosed", [](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
+         std::vector<Real> retval(grid.nodes.size());
+
+         for (uint i = 0; i < grid.nodes.size(); i++) {
+            retval[i] = grid.nodes[i].openFieldLine;
          }
 
          return retval;
@@ -1567,12 +1431,58 @@ int main(int argc, char** argv) {
 
             return retval;
       }));
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_openDistance", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_correctionFactor", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-            std::vector<Real> retval(grid.nodes.size());
+            std::vector<Real> retval(ionosphereGrid.elements.size());
 
-            for(uint i=0; i<grid.nodes.size(); i++) {
-               retval[i] = nodes[i].parameters[ionosphereParameters::OPENCLOSEDIST];
+            for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+               // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
+               std::array<uint32_t, 3>& corners = ionosphereGrid.elements[el].corners;
+               Real A = ionosphereGrid.elementArea(el);
+
+               auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
+               auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
+               auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
+
+               Eigen::Vector3d r0(ionosphereGrid.nodes[corners[0]].x.data());
+               Eigen::Vector3d r1(ionosphereGrid.nodes[corners[1]].x.data());
+               Eigen::Vector3d r2(ionosphereGrid.nodes[corners[2]].x.data());
+
+               Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
+
+               // Barycentric coordinates
+               auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+                  return ((r0-p).cross(r1-p)).norm() / (2*A);
+               };
+               auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+                  return ((r1-p).cross(r2-p)).norm() / (2*A);
+               };
+               auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+                  return ((r2-p).cross(r0-p)).norm() / (2*A);
+               };
+
+               // Barycentric gradients (these are constant per element)
+               Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
+               Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
+               Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
+
+               // Whitney 1-form basis functions
+               auto w1 = [&](const Eigen::Vector3d& p) {
+                  return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
+               };
+               auto w2 = [&](const Eigen::Vector3d& p) {
+                  return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
+               };
+               auto w3 = [&](const Eigen::Vector3d& p) {
+                  return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
+               };
+
+               // Effective curl-free current in this element
+               Eigen::Vector3d j_cf = sqrt(A) * (o1*edgeLength[e1]*edgeJDiv[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJDiv[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJDiv[e3] *w3(barycentre));
+
+               Real MLT = atan2(barycentre[1], barycentre[0]) * 12 / M_PI + 12;
+
+               retval[el]= pow(c4H(MLT,1)/c4P(MLT,1) * 1000*j_cf.norm(),1./(1.+c5P(MLT,1)-c5H(MLT,1))) / (1000*j_cf.norm());
             }
 
             return retval;
