@@ -41,7 +41,7 @@ SysBoundary::~SysBoundary() {}
 
 // Element Barycentre
 Eigen::Vector3d getElementBarycentre(SphericalTriGrid& grid, uint32_t el) {
-   Eigen::Vector3d barycentre;
+   Eigen::Vector3d barycentre(0,0,0);
 
    SphericalTriGrid::Element& element = grid.elements[el];
    for(uint i=0; i<3; i++) {
@@ -561,7 +561,11 @@ int main(int argc, char** argv) {
 
    // Initialize ionosphere grid
    Ionosphere::innerRadius =  physicalconstants::R_E + 100e3;
-   ionosphereGrid.initializeSphericalFibonacci(numNodes);
+   if(numNodes > 0) {
+      ionosphereGrid.initializeSphericalFibonacci(numNodes);
+   } else {
+      ionosphereGrid.initializeIcosahedron();
+   }
    if(gaugeFixString == "pole") {
       ionosphereGrid.gaugeFixing = SphericalTriGrid::Pole;
    } else if (gaugeFixString == "integral") {
@@ -862,24 +866,28 @@ int main(int argc, char** argv) {
                }
             }
 
-            int32_t otherElementi = ionosphereGrid.findElementNeighbour(el, cm, ci);
-            int32_t otherElementj = ionosphereGrid.findElementNeighbour(el, cm, cj);
+            int32_t otherElementi = ionosphereGrid.findElementNeighbour(nodes[m].touchingElements[el], cm, ci);
+            int32_t otherElementj = ionosphereGrid.findElementNeighbour(nodes[m].touchingElements[el], cm, cj);
 
-            if(otherElementi == -1) {
-               fprintf(stderr, "Element %i doesn't have an element on its edge between nodes %i and %i!\n", el, m, i);
-            }
-            if(otherElementj == -1) {
-               fprintf(stderr, "Element %i doesn't have an element on its edge between nodes %i and %i!\n", el, m, j);
-            }
-            Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
+            Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, nodes[m].touchingElements[el]);
             Eigen::Vector3d barycentrei = getElementBarycentre(ionosphereGrid, otherElementi);
             Eigen::Vector3d barycentrej = getElementBarycentre(ionosphereGrid, otherElementj);
+            //printf("Around node %i, element %i has barycentre [%le, %le, %le],\n"
+            //       "              i-element %i has barycentre [%le, %le, %le],\n"
+            //       "              j-element %i has barycentre [%le, %le, %le].\n", m,
+            //       nodes[m].touchingElements[el], barycentre[0], barycentre[1], barycentre[2],
+            //       otherElementi, barycentrei[0], barycentrei[1], barycentrei[2],
+            //       otherElementj, barycentrej[0], barycentrej[1], barycentrej[2]);
 
             // Find the voronoi polygon edge lengths
             Real dualEdgeLengthi = (barycentrei - barycentre).norm();
             Real dualEdgeLengthj = (barycentrej - barycentre).norm();
 
             auto [e,orientation] = getEdgeIndexOrientation(m,i);
+            Real oldValue = curlSolverMatrix.coeffRef(m, e);
+            //if(oldValue != 0) {
+            //   printf("Node %i, edge %i has oldValue = %le and new value = %le\n", m, e, oldValue, orientation * dualEdgeLengthi / dualPolygonArea);
+            //}
             curlSolverMatrix.coeffRef(m, e) = orientation * dualEdgeLengthi / dualPolygonArea;
             std::tie(e,orientation) = getEdgeIndexOrientation(m,j);
             curlSolverMatrix.coeffRef(m, e) = orientation * dualEdgeLengthj / dualPolygonArea;
@@ -1060,9 +1068,9 @@ int main(int argc, char** argv) {
          Real totalA=0;
          // Sum all incoming edges
          for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
-            Real A = ionosphereGrid.elementArea(el);
+            Real A = ionosphereGrid.elementArea(nodes[n].touchingElements[el]);
             totalA += A;
-            J += elementDivFreeCurrent[el] * A;
+            J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
          }
          J/=totalA;
 
@@ -1353,9 +1361,9 @@ int main(int argc, char** argv) {
                Real totalA=0;
                // Sum all incoming edges
                for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
-                  Real A = grid.elementArea(el);
+                  Real A = grid.elementArea(nodes[n].touchingElements[el]);
                   totalA += A;
-                  J += elementDivFreeCurrent[el] * A;
+                  J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
                }
                J/=totalA;
 
@@ -1367,7 +1375,45 @@ int main(int argc, char** argv) {
 
             return retval;
       }));
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromDivJNode", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_jFromDivJNode", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+
+            std::vector<Real> retval(3*grid.nodes.size());
+            for(uint n=0; n<grid.nodes.size(); n++) {
+               Eigen::Vector3d J(0,0,0);
+               int numEdges=0;
+               for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
+                  SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[el]];
+
+                  int i=0, j=0;
+                  for(int c=0; c<3; c++) {
+                     if(element.corners[c] == n) {
+                        i = element.corners[(c+1)%3];
+                        j = element.corners[(c+2)%3];
+                        break;
+                     }
+                  }
+
+                  Eigen::Vector3d rn(nodes[n].x.data());
+                  Eigen::Vector3d ri(nodes[i].x.data());
+                  Eigen::Vector3d rj(nodes[j].x.data());
+
+                  auto [e,orientation] = getEdgeIndexOrientation(i,n);
+                  J += 0.5 * edgeJDiv[e] * orientation * (rn-ri).normalized();
+
+                  std::tie(e,orientation) = getEdgeIndexOrientation(j,n);
+                  J += 0.5 * edgeJDiv[e] * orientation * (rn-rj).normalized();
+                  numEdges++;
+               }
+
+               J /= numEdges;
+
+               retval[3*n] = J[0];
+               retval[3*n+1] = J[1];
+               retval[3*n+2] = J[2];
+            }
+            return retval;
+      }));
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromDivJ", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
             std::vector<Real> retval(3*grid.elements.size());
 
@@ -1396,7 +1442,7 @@ int main(int argc, char** argv) {
             for(uint n=0; n<grid.nodes.size(); n++) {
                Real dualPolygonArea = 0;
                for(uint32_t el=0; el< grid.nodes[n].numTouchingElements; el++) {
-                  Real A = ionosphereGrid.elementArea(el);
+                  Real A = ionosphereGrid.elementArea(grid.nodes[n].touchingElements[el]);
                   dualPolygonArea += A / 3.;
                }
                retval[n] = dualPolygonArea;
