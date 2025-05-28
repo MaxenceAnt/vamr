@@ -33,6 +33,9 @@
 #include "../backgroundfield/fieldfunction.hpp"
 #include "../fieldsolver/fs_common.h"
 
+#include <Eigen/Sparse>
+#include <Eigen/Geometry>
+
 using namespace projects;
 using namespace std;
 
@@ -159,6 +162,7 @@ namespace SBC {
          Rees1989, // Rees (1989)
          SergienkoIvanov, // Sergienko & Ivanov (1993)
          Robinson2020, // Robinson et al (2020)
+         Juusola2025,  // Juusola et al (2025)
       } ionizationModel;
 
       // Ionisation production table
@@ -288,6 +292,19 @@ namespace SBC {
             area[2]*=-1.;
          }
          return area;
+      }
+      Eigen::Vector3d elementBarycentre(uint32_t el) {
+         Eigen::Vector3d barycentre(0,0,0);
+
+         Element& element = elements[el];
+         for(uint i=0; i<3; i++) {
+            Eigen::Vector3d corner(nodes[element.corners[i]].x.data());
+
+            barycentre += corner;
+         }
+         barycentre /= 3.;
+
+         return barycentre;
       }
 
       Real nodeNeighbourArea(uint32_t nodeIndex) { // Summed area of all touching elements
