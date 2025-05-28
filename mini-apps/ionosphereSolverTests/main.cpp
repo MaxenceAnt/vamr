@@ -620,6 +620,7 @@ int main(int argc, char** argv) {
 
    std::vector<SphericalTriGrid::Node>& nodes = ionosphereGrid.nodes;
    std::vector< Real > elementCorrectionFactors(ionosphereGrid.elements.size());
+   std::vector< Eigen::Vector3d > elementCurlFreeCurrent(ionosphereGrid.elements.size());
    std::vector< Eigen::Vector3d > elementDivFreeCurrent(ionosphereGrid.elements.size());
 
    // Set FACs
@@ -1041,7 +1042,7 @@ int main(int argc, char** argv) {
          // Effective curl-free current in this element
          Eigen::Vector3d j_cf = (o1*edgeLength[e1]*edgeJDiv[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJDiv[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJDiv[e3] *w3(barycentre)) / sqrt(A);
 
-         elementDivFreeCurrent[el] = j_cf;
+         elementCurlFreeCurrent[el] = j_cf;
 
          Real MLT = atan2(barycentre[1], barycentre[0]) * 12 / M_PI + 12;
 
@@ -1057,6 +1058,55 @@ int main(int argc, char** argv) {
 
       for(uint e=0; e<edgeJCurl.size(); e++) {
          edgeJCurl[e] = vJ[e];
+      }
+
+      // Now, likewise interpolate edge-localized J_DF to elements
+      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+         // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
+         std::array<uint32_t, 3>& corners = ionosphereGrid.elements[el].corners;
+         Real A = ionosphereGrid.elementArea(el);
+
+         auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
+         auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
+         auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
+
+         Eigen::Vector3d r0(ionosphereGrid.nodes[corners[0]].x.data());
+         Eigen::Vector3d r1(ionosphereGrid.nodes[corners[1]].x.data());
+         Eigen::Vector3d r2(ionosphereGrid.nodes[corners[2]].x.data());
+
+         Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
+
+         // Barycentric coordinates
+         auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+            return ((r0-p).cross(r1-p)).norm() / (2*A);
+         };
+         auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+            return ((r1-p).cross(r2-p)).norm() / (2*A);
+         };
+         auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+            return ((r2-p).cross(r0-p)).norm() / (2*A);
+         };
+
+         // Barycentric gradients (these are constant per element)
+         Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
+         Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
+         Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
+
+         // Whitney 1-form basis functions
+         auto w1 = [&](const Eigen::Vector3d& p) {
+            return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
+         };
+         auto w2 = [&](const Eigen::Vector3d& p) {
+            return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
+         };
+         auto w3 = [&](const Eigen::Vector3d& p) {
+            return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
+         };
+
+         // Effective curl-free current in this element
+         Eigen::Vector3d j_df = (o1*edgeLength[e1]*edgeJCurl[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJCurl[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJCurl[e3] *w3(barycentre)) / sqrt(A);
+
+         elementDivFreeCurrent[el] = j_df;
       }
 
       // Next, evaluate Sigma as a function of inplane-J and MLT
@@ -1418,7 +1468,7 @@ int main(int argc, char** argv) {
             std::vector<Real> retval(3*grid.elements.size());
 
             for(uint el=0; el<grid.elements.size(); el++) {
-               Eigen::Vector3d J = elementDivFreeCurrent[el];
+               Eigen::Vector3d J = elementCurlFreeCurrent[el];
 
                retval[3*el] = J[0];
                retval[3*el+1] = J[1];
@@ -1427,38 +1477,38 @@ int main(int argc, char** argv) {
 
             return retval;
       }));
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_correctionFactor", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+      //outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_correctionFactor", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-            std::vector<Real> retval(ionosphereGrid.elements.size());
+      //      std::vector<Real> retval(ionosphereGrid.elements.size());
 
-            for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-               retval[el]= elementCorrectionFactors[el];
-            }
-            return retval;
-      }));
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_dualPolygonArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
-            std::vector<Real> retval(grid.nodes.size());
+      //      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+      //         retval[el]= elementCorrectionFactors[el];
+      //      }
+      //      return retval;
+      //}));
+      //outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_dualPolygonArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+      //      std::vector<Real> retval(grid.nodes.size());
 
-            for(uint n=0; n<grid.nodes.size(); n++) {
-               Real dualPolygonArea = 0;
-               for(uint32_t el=0; el< grid.nodes[n].numTouchingElements; el++) {
-                  Real A = ionosphereGrid.elementArea(grid.nodes[n].touchingElements[el]);
-                  dualPolygonArea += A / 3.;
-               }
-               retval[n] = dualPolygonArea;
-            }
+      //      for(uint n=0; n<grid.nodes.size(); n++) {
+      //         Real dualPolygonArea = 0;
+      //         for(uint32_t el=0; el< grid.nodes[n].numTouchingElements; el++) {
+      //            Real A = ionosphereGrid.elementArea(grid.nodes[n].touchingElements[el]);
+      //            dualPolygonArea += A / 3.;
+      //         }
+      //         retval[n] = dualPolygonArea;
+      //      }
 
-            return retval;
-      }));
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_elementArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+      //      return retval;
+      //}));
+      //outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_elementArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-            std::vector<Real> retval(ionosphereGrid.elements.size());
+      //      std::vector<Real> retval(ionosphereGrid.elements.size());
 
-            for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-               retval[el] = ionosphereGrid.elementArea(el);
-            }
-            return retval;
-      }));
+      //      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+      //         retval[el] = ionosphereGrid.elementArea(el);
+      //      }
+      //      return retval;
+      //}));
    }
 
    for(unsigned int i=0; i<outputDROs.size(); i++) {
