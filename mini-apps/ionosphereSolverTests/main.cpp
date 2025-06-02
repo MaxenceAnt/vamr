@@ -846,7 +846,7 @@ int main(int argc, char** argv) {
          // Calculate the effective area of the Voronoi cell surrounding this node
          Real dualPolygonArea = 0;
          for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
-            Real A = ionosphereGrid.elementArea(el);
+            Real A = ionosphereGrid.elementArea(nodes[m].touchingElements[el]);
             dualPolygonArea += A / 3.;
          }
 
