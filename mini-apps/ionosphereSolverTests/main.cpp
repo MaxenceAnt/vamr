@@ -425,6 +425,53 @@ std::tuple<uint,int> getEdgeIndexOrientation(uint32_t a, uint32_t b)  {
    return {edgeIndex[hash], orientation};
 }
 
+// Interpolate edge-based quantity to elements (barycentres) using Whitney 1-forms.
+// (DOI: 10.1145/1141911.1141991)
+Eigen::Vector3d whitneyInterpolate(SphericalTriGrid& grid, uint32_t el, std::vector<Real> edgeValue) {
+   std::array<uint32_t, 3>& corners = grid.elements[el].corners;
+   Real A = grid.elementArea(el);
+
+   auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
+   auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
+   auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
+
+   Eigen::Vector3d r0(grid.nodes[corners[0]].x.data());
+   Eigen::Vector3d r1(grid.nodes[corners[1]].x.data());
+   Eigen::Vector3d r2(grid.nodes[corners[2]].x.data());
+
+   Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
+
+   // Barycentric coordinates
+   auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+      return ((r0-p).cross(r1-p)).norm() / (2*A);
+   };
+   auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+      return ((r1-p).cross(r2-p)).norm() / (2*A);
+   };
+   auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+      return ((r2-p).cross(r0-p)).norm() / (2*A);
+   };
+
+   // Barycentric gradients (these are constant per element)
+   Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
+   Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
+   Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
+
+   // Whitney 1-form basis functions
+   auto w1 = [&](const Eigen::Vector3d& p) {
+      return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
+   };
+   auto w2 = [&](const Eigen::Vector3d& p) {
+      return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
+   };
+   auto w3 = [&](const Eigen::Vector3d& p) {
+      return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
+   };
+
+   // Effective interpolated value this element
+   return o1*edgeLength[e1]*edgeValue[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeValue[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeValue[e3] *w3(barycentre);
+}
+
 int main(int argc, char** argv) {
 
    // Init MPI
@@ -873,22 +920,12 @@ int main(int argc, char** argv) {
             Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, nodes[m].touchingElements[el]);
             Eigen::Vector3d barycentrei = getElementBarycentre(ionosphereGrid, otherElementi);
             Eigen::Vector3d barycentrej = getElementBarycentre(ionosphereGrid, otherElementj);
-            //printf("Around node %i, element %i has barycentre [%le, %le, %le],\n"
-            //       "              i-element %i has barycentre [%le, %le, %le],\n"
-            //       "              j-element %i has barycentre [%le, %le, %le].\n", m,
-            //       nodes[m].touchingElements[el], barycentre[0], barycentre[1], barycentre[2],
-            //       otherElementi, barycentrei[0], barycentrei[1], barycentrei[2],
-            //       otherElementj, barycentrej[0], barycentrej[1], barycentrej[2]);
 
             // Find the voronoi polygon edge lengths
             Real dualEdgeLengthi = (barycentrei - barycentre).norm();
             Real dualEdgeLengthj = (barycentrej - barycentre).norm();
 
             auto [e,orientation] = getEdgeIndexOrientation(m,i);
-            Real oldValue = curlSolverMatrix.coeffRef(m, e);
-            //if(oldValue != 0) {
-            //   printf("Node %i, edge %i has oldValue = %le and new value = %le\n", m, e, oldValue, orientation * dualEdgeLengthi / dualPolygonArea);
-            //}
             curlSolverMatrix.coeffRef(m, e) = orientation * dualEdgeLengthi / dualPolygonArea;
             std::tie(e,orientation) = getEdgeIndexOrientation(m,j);
             curlSolverMatrix.coeffRef(m, e) = orientation * dualEdgeLengthj / dualPolygonArea;
@@ -941,26 +978,12 @@ int main(int argc, char** argv) {
          // divergence-free part here yet, as its values depend on the
          // solution of the curl-free part. Correction happens further
          // down.
-         vRHS1[ionosphereGrid.nodes.size() + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
-              + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
-              + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
+         vRHS1[ionosphereGrid.nodes.size() + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * 1./A1
+              + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * 1./A2
+              + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * 1./A3);
          vRHS2[ionosphereGrid.nodes.size() + el] = 0;
 
       }
-
-      // Add Harmonic constraint (by pinning a cross-equator current to zero)
-      //for(const auto& [hash, edgeIdx] : edgeIndex) {
-      //   uint32_t node1 = hash & 0xffffffff;
-      //   uint32_t node2 = hash >> 32;
-
-      //   // Find first edge that crosses the equator
-      //   if(nodes[node1].x[0] * nodes[node2].x[0] < 0) {
-      //      curlSolverMatrix.insert(curlSolverMatrix.rows()-1, edgeIdx) = 1.;
-      //      vRHS1[vRHS1.size()-1] = 0.;
-      //      vRHS2[vRHS2.size()-1] = 0.;
-      //      break;
-      //   }
-      //}
 
       curlSolverMatrix.makeCompressed();
 
@@ -999,51 +1022,11 @@ int main(int argc, char** argv) {
       // Interpolate edge-localized J_CF to elements
       for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
          // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
-         std::array<uint32_t, 3>& corners = ionosphereGrid.elements[el].corners;
-         Real A = ionosphereGrid.elementArea(el);
-
-         auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
-         auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
-         auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
-
-         Eigen::Vector3d r0(ionosphereGrid.nodes[corners[0]].x.data());
-         Eigen::Vector3d r1(ionosphereGrid.nodes[corners[1]].x.data());
-         Eigen::Vector3d r2(ionosphereGrid.nodes[corners[2]].x.data());
-
-         Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
-
-         // Barycentric coordinates
-         auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
-            return ((r0-p).cross(r1-p)).norm() / (2*A);
-         };
-         auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
-            return ((r1-p).cross(r2-p)).norm() / (2*A);
-         };
-         auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
-            return ((r2-p).cross(r0-p)).norm() / (2*A);
-         };
-
-         // Barycentric gradients (these are constant per element)
-         Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
-         Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
-         Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
-
-         // Whitney 1-form basis functions
-         auto w1 = [&](const Eigen::Vector3d& p) {
-            return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
-         };
-         auto w2 = [&](const Eigen::Vector3d& p) {
-            return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
-         };
-         auto w3 = [&](const Eigen::Vector3d& p) {
-            return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
-         };
-
-         // Effective curl-free current in this element
-         Eigen::Vector3d j_cf = (o1*edgeLength[e1]*edgeJDiv[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJDiv[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJDiv[e3] *w3(barycentre)) / sqrt(A);
+         Eigen::Vector3d j_cf = whitneyInterpolate(ionosphereGrid, el, edgeJDiv);
 
          elementCurlFreeCurrent[el] = j_cf;
 
+         Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
          Real MLT = atan2(barycentre[1], barycentre[0]) * 12 / M_PI + 12;
 
          // Note: The coefficients want to be looked up in A/km, so we multiply by 1000
@@ -1062,49 +1045,8 @@ int main(int argc, char** argv) {
 
       // Now, likewise interpolate edge-localized J_DF to elements
       for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-         // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
-         std::array<uint32_t, 3>& corners = ionosphereGrid.elements[el].corners;
-         Real A = ionosphereGrid.elementArea(el);
-
-         auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
-         auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
-         auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
-
-         Eigen::Vector3d r0(ionosphereGrid.nodes[corners[0]].x.data());
-         Eigen::Vector3d r1(ionosphereGrid.nodes[corners[1]].x.data());
-         Eigen::Vector3d r2(ionosphereGrid.nodes[corners[2]].x.data());
-
-         Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
-
-         // Barycentric coordinates
-         auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
-            return ((r0-p).cross(r1-p)).norm() / (2*A);
-         };
-         auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
-            return ((r1-p).cross(r2-p)).norm() / (2*A);
-         };
-         auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
-            return ((r2-p).cross(r0-p)).norm() / (2*A);
-         };
-
-         // Barycentric gradients (these are constant per element)
-         Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
-         Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
-         Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
-
-         // Whitney 1-form basis functions
-         auto w1 = [&](const Eigen::Vector3d& p) {
-            return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
-         };
-         auto w2 = [&](const Eigen::Vector3d& p) {
-            return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
-         };
-         auto w3 = [&](const Eigen::Vector3d& p) {
-            return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
-         };
-
          // Effective curl-free current in this element
-         Eigen::Vector3d j_df = (o1*edgeLength[e1]*edgeJCurl[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJCurl[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJCurl[e3] *w3(barycentre)) / sqrt(A);
+         Eigen::Vector3d j_df = whitneyInterpolate(ionosphereGrid, el, edgeJCurl);
 
          elementDivFreeCurrent[el] = j_df;
       }
