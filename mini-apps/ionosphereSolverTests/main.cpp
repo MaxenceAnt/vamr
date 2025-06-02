@@ -887,8 +887,6 @@ int main(int argc, char** argv) {
       for(uint m=0; m<nodes.size(); m++) {
 
          // Divergence
-         vRHS1[m] = 0;
-         vRHS2[m] = ionosphereGrid.nodes[m].parameters[ionosphereParameters::SOURCE];
 
          // Calculate the effective area of the Voronoi cell surrounding this node
          Real dualPolygonArea = 0;
@@ -896,6 +894,8 @@ int main(int argc, char** argv) {
             Real A = ionosphereGrid.elementArea(nodes[m].touchingElements[el]);
             dualPolygonArea += A / 3.;
          }
+         vRHS1[m] = 0;
+         vRHS2[m] = ionosphereGrid.nodes[m].parameters[ionosphereParameters::SOURCE] / dualPolygonArea;
 
          for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
             SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[m].touchingElements[el]];
