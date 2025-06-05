@@ -70,20 +70,27 @@ std::tuple<Real, Real> getConnectingSegmentLengths(SphericalTriGrid& grid, uint3
       if(element1.corners[i] == element2.corners[0] ||
          element1.corners[i] == element2.corners[1] ||
          element1.corners[i] == element2.corners[2]) {
+         for(uint j=0; j<3; j++) {
+            if(i != j && (element1.corners[j] == element2.corners[0] ||
+                          element1.corners[j] == element2.corners[1] ||
+                          element1.corners[j] == element2.corners[2])) {
 
-         uint32_t corner1 = element1.corners[i];
-         uint32_t corner2 = element1.corners[i+1];
-         Eigen::Vector3d corner1Pos(grid.nodes[corner1].x.data());
-         Eigen::Vector3d corner2Pos(grid.nodes[corner2].x.data());
-         Eigen::Vector3d edgeMidpoint = (corner1Pos + corner2Pos) / 2.;
+                  uint32_t corner1 = element1.corners[i];
+                  uint32_t corner2 = element1.corners[j];
+                  // printf("Common edge: %d - %d\n", corner1, corner2);
+                  Eigen::Vector3d corner1Pos(grid.nodes[corner1].x.data());
+                  Eigen::Vector3d corner2Pos(grid.nodes[corner2].x.data());
+                  Eigen::Vector3d edgeMidpoint = (corner1Pos + corner2Pos) / 2.;
 
-         Real length1 = (edgeMidpoint - barycentre1).norm();
-         Real length2 = (edgeMidpoint - barycentre2).norm();
+                  Real length1 = (edgeMidpoint - barycentre1).norm();
+                  Real length2 = (edgeMidpoint - barycentre2).norm();
 
-         return std::make_tuple(length1, length2);
-      }
-   }
-} 
+                  return std::make_tuple(length1, length2); 
+            }
+         }
+      } 
+   }  
+}
 
 
 // Ionosoheric Sigma calculation function coefficients from
@@ -786,6 +793,11 @@ int main(int argc, char** argv) {
       return 1;
    }
 
+   // Eigen vector and matrix for solving
+   Eigen::VectorXd vJ(2 * ionosphereGrid.elements.size()); // 2 * ionosphereGrid.elements.size() because we have two components of J in every element 
+   Eigen::VectorXd vRHS1(ionosphereGrid.elements.size() + ionosphereGrid.elements.size()); // Right hand side for divergence-free system
+   Eigen::VectorXd vRHS2(ionosphereGrid.elements.size() + ionosphereGrid.elements.size()); // Right hand side for curl-free system
+   Eigen::SparseMatrix<Real> curlSolverMatrix(vRHS1.size(), vJ.size());
 
    // Set conductivity tensors
    if(sigmaString == "identity") {
@@ -883,15 +895,11 @@ int main(int argc, char** argv) {
       
 
 
-      // Eigen vector and matrix for solving
-      Eigen::VectorXd vJ(2 * ionosphereGrid.elements.size()); // 2 * ionosphereGrid.elements.size() because we have two components of J in every element 
-      Eigen::VectorXd vRHS1(ionosphereGrid.elements.size() + ionosphereGrid.elements.size()); // Right hand side for divergence-free system
-      Eigen::VectorXd vRHS2(ionosphereGrid.elements.size() + ionosphereGrid.elements.size()); // Right hand side for curl-free system
-      Eigen::SparseMatrix<Real> curlSolverMatrix(vRHS1.size(), vJ.size());
 
+ 
       if(!quiet) {
          cout << "Building curl solver matrix." << endl;
-      }
+      } 
 
       if(!quiet) {
          cout << "Adding divergence constraints." << endl;
@@ -904,7 +912,6 @@ int main(int argc, char** argv) {
             cout << "Adding divergence constraints: " << el << "/" << ionosphereGrid.elements.size() << endl;
          }
 
-         Real elArea = ionosphereGrid.elementArea(el);
 
          // Divergence
          vRHS1[el] = 0;
@@ -913,6 +920,7 @@ int main(int argc, char** argv) {
          // Distribute FACs by area ratios
          SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
          Real A = ionosphereGrid.elementArea(el);
+         Real elArea = ionosphereGrid.elementArea(el);
 
          int i=element.corners[0],j=element.corners[1],k=element.corners[2];
 
@@ -927,7 +935,7 @@ int main(int argc, char** argv) {
             A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
          }
 
-
+         printf("VRHS Element %d: A = %le, A1 = %le, A2 = %le, A3 = %le\n", el, A, A1, A2, A3);
          vRHS2[el] = (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
               + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
               + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
@@ -945,6 +953,7 @@ int main(int argc, char** argv) {
          // from each element touching that node, weighted by the area of the element
          // divided by the area of the Voronoi cell surrounding that node.
 
+         // printf("numcorners: %d\n", ionosphereGrid.elements[el].corners.size());
          for(uint idx=0; idx<ionosphereGrid.elements[el].corners.size(); idx++) {
             uint32_t gridCornerIndex = ionosphereGrid.elements[el].corners[idx];
 
@@ -952,12 +961,15 @@ int main(int argc, char** argv) {
             Real dualPolygonArea = 0;
             for(uint32_t i=0; i<nodes[gridCornerIndex].numTouchingElements; i++) {
                Real A = ionosphereGrid.elementArea(nodes[gridCornerIndex].touchingElements[i]);
-               dualPolygonArea += A / 3.;
+               dualPolygonArea += A;
             }
+            
+            // printf("dualpolygonarea = %le, numtouchingelements = %d\n", dualPolygonArea, nodes[gridCornerIndex].numTouchingElements);
 
+            // printf("numtouching elements: %d,", nodes[gridCornerIndex].numTouchingElements);
             for(uint32_t elLocalIndex=0; elLocalIndex<nodes[gridCornerIndex].numTouchingElements; elLocalIndex++) {
                SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[gridCornerIndex].touchingElements[elLocalIndex]];
-
+ 
                // Find the two other nodes on this element
                int gridI=0,gridJ=0;
                int localC=0,localI=0,localJ=0;
@@ -980,41 +992,56 @@ int main(int argc, char** argv) {
                   return 1;
                }
                auto [l1, l2] = getConnectingSegmentLengths(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi);
+               // printf("Element %i, otherElementi %i, l1 = %le, l2 = %le\n",
+               //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi, l1, l2);
 
                Eigen::Vector3d rm(nodes[gridCornerIndex].x.data());
                Eigen::Vector3d ri(nodes[gridI].x.data());
 
                Eigen::Vector3d edge = (ri - rm) / (ri - rm).norm();
                
-               Eigen::Vector3d barycentrem = getElementBarycentre(ionosphereGrid, el);
+               Eigen::Vector3d barycentrem = getElementBarycentre(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex]);
                Eigen::Vector3d barycentrei = getElementBarycentre(ionosphereGrid, otherElementi);
                Eigen::Vector3d barycentrej = getElementBarycentre(ionosphereGrid, otherElementj);
 
                // Transform edges to local coordinate system
                
-               Eigen::Vector3d edgem = Eigen::Quaterniond::FromTwoVectors(barycentrem.normalized(), Eigen::Vector3d::UnitZ()) * edge;
-               Eigen::Vector3d edgei = Eigen::Quaterniond::FromTwoVectors(barycentrei.normalized(), Eigen::Vector3d::UnitZ()) * edge;
+               Eigen::Vector3d edgem = Eigen::Quaterniond::FromTwoVectors(barycentrem.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+               Eigen::Vector3d edgei = Eigen::Quaterniond::FromTwoVectors(barycentrei.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
 
                // Division by 2 due to double counting
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(3.*dualPolygonArea)) * (edgem(0) * l1 / (2. * dualPolygonArea));
-               curlSolverMatrix.coeffRef(el, 2 * otherElementi) += (elArea/(3.0*dualPolygonArea)) * edgei(0) * l2 / (2. * dualPolygonArea);
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(3.*dualPolygonArea)) * edgem(1) * l1 / (2. * dualPolygonArea);
-               curlSolverMatrix.coeffRef(el, 2 * otherElementi + 1) += (elArea/(3.0*dualPolygonArea)) * edgei(1) * l2 / (2. * dualPolygonArea);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(dualPolygonArea)) * (edgem(0) / (2.));
+               curlSolverMatrix.coeffRef(el, 2 * otherElementi) += (elArea/(dualPolygonArea)) * edgei(0) / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(dualPolygonArea)) * edgem(1) / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * otherElementi + 1) += (elArea/(dualPolygonArea)) * edgei(1) / (2.);
 
                std::tie(l1, l2) = getConnectingSegmentLengths(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementj);
+               // printf("Element %i, otherElementi %i, l1 = %le, l2 = %le\n",
+               //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi, l1, l2);
 
                Eigen::Vector3d rj(nodes[gridJ].x.data());
 
                edge = (rj - rm) / (rj - rm).norm();
                
-               edgem = Eigen::Quaterniond::FromTwoVectors(barycentrem, Eigen::Vector3d::UnitZ()) * edge;
-               Eigen::Vector3d edgej = Eigen::Quaterniond::FromTwoVectors(barycentrej.normalized(), Eigen::Vector3d::UnitZ()) * edge;
+               edgem = Eigen::Quaterniond::FromTwoVectors(barycentrem.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+               Eigen::Vector3d edgej = Eigen::Quaterniond::FromTwoVectors(barycentrej.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
 
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(3.*dualPolygonArea)) * edgem(0) * l1 / (2. * dualPolygonArea);
-               curlSolverMatrix.coeffRef(el, 2 * otherElementj) += (elArea/(3.*dualPolygonArea)) * edgej(0) * l2 / (2. * dualPolygonArea);
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(3.*dualPolygonArea)) * edgem(1) * l1 / (2. * dualPolygonArea);
-               curlSolverMatrix.coeffRef(el, 2 * otherElementj + 1) += (elArea/(3.*dualPolygonArea)) * edgej(1) * l2 / (2. * dualPolygonArea);
+               // Print out element global number and transformed edge vectors
+               // printf("Element %i: edgem = [%le, %le, %le], edgej = [%le, %le, %le], edgei = [%le, %le, %le], edge = [%le, %le, %le]\n",
+               //        el,
+               //        edgem(0), edgem(1), edgem(2),
+               //        edgej(0), edgej(1), edgej(2),
+               //        edgei(0), edgei(1), edgei(2),
+               //        edge(0), edge(1), edge(2));
 
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(dualPolygonArea)) * edgem(0) / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * otherElementj) += (elArea/(dualPolygonArea)) * edgej(0) / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(dualPolygonArea)) * edgem(1) / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * otherElementj + 1) += (elArea/(dualPolygonArea)) * edgej(1) / (2.);
+
+               // Print out areas
+                printf("Div Element %d corner %d touching element %d: A =  %le, A1 = %le\n", el, ionosphereGrid.elements[el].corners[idx], ionosphereGrid.nodes[gridCornerIndex].touchingElements[elLocalIndex],elArea, dualPolygonArea);
+               
 
                //printf("Around node %i, element %i has barycentre [%le, %le, %le],\n"
                //       "              i-element %i has barycentre [%le, %le, %le],\n"
@@ -1035,104 +1062,118 @@ int main(int argc, char** argv) {
                // curlSolverMatrix.coeffRef(m, e) = orientation * dualEdgeLengthi / dualPolygonArea;
                // std::tie(e,orientation) = getEdgeIndexOrientation(m,j);
                // curlSolverMatrix.coeffRef(m, e) = orientation * dualEdgeLengthj / dualPolygonArea;
+               
             }
          }
       }
+
+      // //Print out number of zeroes in each row of the matrix
+      // for(int i=0; i<curlSolverMatrix.rows(); i++) {
+      //    int numZeroes = 0;
+      //    for(int j=0; j<curlSolverMatrix.cols(); j++) {
+      //       if(curlSolverMatrix.coeff(i,j) == 0) {
+      //          numZeroes++;
+      //       }
+      //    }
+      //    if(numZeroes > 0) {
+      //       cout << "Row " << i << " has " << numZeroes << " zeroes." << endl;
+      //    }
+      // }
  
       if(!quiet) {
          cout << "Done." << endl;
       }
-      // Add curlJ constraints for every element until the solver is happy.
-      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-         SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
-         Real A = ionosphereGrid.elementArea(el);
+      // // Add curlJ constraints for every element until the solver is happy.
+      // for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+      //    SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
+      //    Real A = ionosphereGrid.elementArea(el);
 
-         if(!quiet && (el % 100) == 0) {
-            cout << "Adding curl constraints: " << el << "/" << ionosphereGrid.elements.size() << endl;
-         }
+      //    if(!quiet && (el % 100) == 0) {
+      //       cout << "Adding curl constraints: " << el << "/" << ionosphereGrid.elements.size() << endl;
+      //    }
 
-         // Apply the discrete DPP-flat operator to the element-centered vector field to
-         // obtain an edge-aligned 1-form, then calculate the discrete curl by taking
-         // the integral of the 1-form along the boundary of the element divided by the
-         // area; that is, summing the inner product of the edge-aligned 1-form with the 
-         // edge vectors of the element d\fivided by the area.
-         //
-         // The inner product between the 1-form, obtained by the action of the discrete 
-         // DPP-flat operator on centre-aligned vector fields, with an edge vector is 
-         // calculated on each edge by a weighted sum of the inner product of the vectors 
-         // associated with each of the elements adjacent to the edge in question with the
-         // edge vector by the ratio of how much each element encloses the line segment 
-         // connecting the centres of the two elements to the total length of this line segment.
-         //
-         // In this implementation, we use the barycentres of the elements as the centres of the elements.
+      //    // Apply the discrete DPP-flat operator to the element-centered vector field to
+      //    // obtain an edge-aligned 1-form, then calculate the discrete curl by taking
+      //    // the integral of the 1-form along the boundary of the element divided by the
+      //    // area; that is, summing the inner product of the edge-aligned 1-form with the 
+      //    // edge vectors of the element d\fivided by the area.
+      //    //
+      //    // The inner product between the 1-form, obtained by the action of the discrete 
+      //    // DPP-flat operator on centre-aligned vector fields, with an edge vector is 
+      //    // calculated on each edge by a weighted sum of the inner product of the vectors 
+      //    // associated with each of the elements adjacent to the edge in question with the
+      //    // edge vector by the ratio of how much each element encloses the line segment 
+      //    // connecting the centres of the two elements to the total length of this line segment.
+      //    //
+      //    // In this implementation, we use the barycentres of the elements as the centres of the elements.
          
-         for (int c = 0; c < 3; c++) {
-            int i = element.corners[c];
-            int j = element.corners[(c + 1) % 3];
+      //    for (int c = 0; c < 3; c++) {
+      //       int i = element.corners[c];
+      //       int j = element.corners[(c + 1) % 3];
 
-            Eigen::Vector3d ri(nodes[i].x.data());
-            Eigen::Vector3d rj(nodes[j].x.data());
+      //       Eigen::Vector3d ri(nodes[i].x.data());
+      //       Eigen::Vector3d rj(nodes[j].x.data());
 
-            auto [e, orientation] = getEdgeIndexOrientation(i, j);
+      //       auto [e, orientation] = getEdgeIndexOrientation(i, j);
 
-            Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
-            Eigen::Vector3d edgeParallel = orientation * Eigen::Quaterniond::FromTwoVectors(barycentre.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
+      //       Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
+      //       Eigen::Vector3d edgeParallel = orientation * Eigen::Quaterniond::FromTwoVectors(barycentre.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
 
-            uint32_t adjacentElementIndex = ionosphereGrid.findElementNeighbour(el, c, (c + 1) % 3);
-            Eigen::Vector3d adjacentBarycentre = getElementBarycentre(ionosphereGrid, adjacentElementIndex);
-            Eigen::Vector3d adjacentEdgeParallel = orientation * Eigen::Quaterniond::FromTwoVectors(adjacentBarycentre.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
+      //       uint32_t adjacentElementIndex = ionosphereGrid.findElementNeighbour(el, c, (c + 1) % 3);
+      //       Eigen::Vector3d adjacentBarycentre = getElementBarycentre(ionosphereGrid, adjacentElementIndex);
+      //       Eigen::Vector3d adjacentEdgeParallel = orientation * Eigen::Quaterniond::FromTwoVectors(adjacentBarycentre.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
 
-            auto [l1, l2] = getConnectingSegmentLengths(ionosphereGrid, el, adjacentElementIndex);
-            Real ltot = l1 + l2;
+      //       auto [l1, l2] = getConnectingSegmentLengths(ionosphereGrid, el, adjacentElementIndex);
+      //       Real ltot = l1 + l2;
 
-            curlSolverMatrix.insert(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex) = edgeParallel(0) * l1 / (ltot * A);
-            curlSolverMatrix.coeffRef(ionosphereGrid.elements.size()+ el, 2 * el) += adjacentEdgeParallel(0) * l2 / (ltot * A);
+      //       curlSolverMatrix.insert(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex) = edgeParallel(0) * l1 / (ltot * A);
+      //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size()+ el, 2 * el) += adjacentEdgeParallel(0) * l2 / (ltot * A);
 
-            curlSolverMatrix.insert(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex + 1) = edgeParallel(1) * l1 / (ltot * A);
-            curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * el + 1) += adjacentEdgeParallel(1) * l2 / (ltot * A);
-         }
+      //       curlSolverMatrix.insert(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex + 1) = edgeParallel(1) * l1 / (ltot * A);
+      //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * el + 1) += adjacentEdgeParallel(1) * l2 / (ltot * A);
+      //    }
 
 
 
-         int i = element.corners[0];
-         int j = element.corners[1];
-         int k = element.corners[2];
+      //    int i = element.corners[0];
+      //    int j = element.corners[1];
+      //    int k = element.corners[2];
 
-         Eigen::Vector3d ri(nodes[i].x.data());
-         Eigen::Vector3d rj(nodes[j].x.data());
-         Eigen::Vector3d rk(nodes[k].x.data());
+      //    Eigen::Vector3d ri(nodes[i].x.data());
+      //    Eigen::Vector3d rj(nodes[j].x.data());
+      //    Eigen::Vector3d rk(nodes[k].x.data());
 
-         // Make sure sign is correct (as edges are oriented)
-         Real clockwise = ri.dot((rj-ri).cross(rk-rj));
-         if(clockwise > 0) {
-            clockwise = -1;
-         } else {
-            clockwise = 1;
-         }
+      //    // Make sure sign is correct (as edges are oriented)
+      //    Real clockwise = ri.dot((rj-ri).cross(rk-rj));
+      //    if(clockwise > 0) {
+      //       clockwise = -1;
+      //    } else {
+      //       clockwise = 1;
+      //    }
 
-         // Distribute FACs by area ratios
-         Real A1 = 0, A2 = 0, A3 = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[i].numTouchingElements; e++) {
-            A1 += ionosphereGrid.elementArea(ionosphereGrid.nodes[i].touchingElements[e]);
-         }
-         for(uint e=0; e<ionosphereGrid.nodes[j].numTouchingElements; e++) {
-            A2 += ionosphereGrid.elementArea(ionosphereGrid.nodes[j].touchingElements[e]);
-         }
-         for(uint e=0; e<ionosphereGrid.nodes[k].numTouchingElements; e++) {
-            A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
-         }
+      //    // Distribute FACs by area ratios
+      //    Real A1 = 0, A2 = 0, A3 = 0;
+      //    for(uint e=0; e<ionosphereGrid.nodes[i].numTouchingElements; e++) {
+      //       A1 += ionosphereGrid.elementArea(ionosphereGrid.nodes[i].touchingElements[e]);
+      //    }
+      //    for(uint e=0; e<ionosphereGrid.nodes[j].numTouchingElements; e++) {
+      //       A2 += ionosphereGrid.elementArea(ionosphereGrid.nodes[j].touchingElements[e]);
+      //    }
+      //    for(uint e=0; e<ionosphereGrid.nodes[k].numTouchingElements; e++) {
+      //       A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
+      //    }
 
-         // NOTE: this is *not* yet the final right-hand side for the
-         // divergence-free part here yet, as its values depend on the
-         // solution of the curl-free part. Correction happens further
-         // down.
-         vRHS1[ionosphereGrid.elements.size() + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
-              + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
-              + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
-         vRHS2[ionosphereGrid.elements.size() + el] = 0;
+      //    // NOTE: this is *not* yet the final right-hand side for the
+      //    // divergence-free part here yet, as its values depend on the
+      //    // solution of the curl-free part. Correction happens further
+      //    // down.
+      //    vRHS1[ionosphereGrid.elements.size() + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
+      //         + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
+      //         + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
+      //    vRHS2[ionosphereGrid.elements.size() + el] = 0;
          
 
-      }
+      // }
 
       // Add Harmonic constraint (by pinning a cross-equator current to zero)
       // for(const auto& [hash, edgeIdx] : edgeIndex) {
@@ -1153,7 +1194,7 @@ int main(int argc, char** argv) {
       if(writeSolverMtarix) {
          ofstream matrixOut("JSolverMatrix.txt");
          for(uint n=0; n<ionosphereGrid.elements.size() + ionosphereGrid.elements.size(); n++) {
-            for(uint m=0; m<ionosphereGrid.elements.size(); m++) {
+            for(uint m=0; m<2*ionosphereGrid.elements.size(); m++) {
 
                Real val=0;
                val = curlSolverMatrix.coeffRef(n, m);
@@ -1177,6 +1218,9 @@ int main(int argc, char** argv) {
       solver.compute(curlSolverMatrix);
       vJ = solver.solve(vRHS2);
       cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
+
+      
+
 
       // for(uint e=0; e<ionosphereGrid.elements.size(); e++) {
       //    edgeJDiv[e] = vJ[e];
@@ -1229,7 +1273,7 @@ int main(int argc, char** argv) {
          // Eigen::Vector3d j_cf = (o1*edgeLength[e1]*edgeJDiv[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJDiv[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJDiv[e3] *w3(barycentre)) / sqrt(A);
          
          Eigen::Vector3d rotatedVJ = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), barycentre.normalized()).toRotationMatrix() * Eigen::Vector3d(vJ[2*el], vJ[2*el+1], 0);
-         elementCurlFreeCurrent[el] = rotatedVJ / sqrt(A);
+         elementCurlFreeCurrent[el] = rotatedVJ;
 
          Real MLT = atan2(barycentre[1], barycentre[0]) * 12 / M_PI + 12;
 
@@ -1239,137 +1283,137 @@ int main(int argc, char** argv) {
          vRHS1[ionosphereGrid.nodes.size() + el] *= correction;
       }
 
-      cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeLength.size() << " edges.\n";
-      vJ = solver.solve(vRHS1);
-      cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
+      // cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeLength.size() << " edges.\n";
+      // vJ = solver.solve(vRHS2);
+      // cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
 
-      // for(uint e=0; e<edgeJCurl.size(); e++) {
-      //    edgeJCurl[e] = vJ[e];
+      // // for(uint e=0; e<edgeJCurl.size(); e++) {
+      // //    edgeJCurl[e] = vJ[e];
+      // // }
+
+      // // Now, likewise interpolate edge-localized J_DF to elements
+      // for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+      //    // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
+      //    std::array<uint32_t, 3>& corners = ionosphereGrid.elements[el].corners;
+      //    Real A = ionosphereGrid.elementArea(el);
+
+      //    // auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
+      //    // auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
+      //    // auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
+
+      //    Eigen::Vector3d r0(ionosphereGrid.nodes[corners[0]].x.data());
+      //    Eigen::Vector3d r1(ionosphereGrid.nodes[corners[1]].x.data());
+      //    Eigen::Vector3d r2(ionosphereGrid.nodes[corners[2]].x.data());
+
+      //    Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
+
+      //    // // Barycentric coordinates
+      //    // auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+      //    //    return ((r0-p).cross(r1-p)).norm() / (2*A);
+      //    // };
+      //    // auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+      //    //    return ((r1-p).cross(r2-p)).norm() / (2*A);
+      //    // };
+      //    // auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+      //    //    return ((r2-p).cross(r0-p)).norm() / (2*A);
+      //    // };
+
+      //    // // Barycentric gradients (these are constant per element)
+      //    // Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
+      //    // Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
+      //    // Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
+
+      //    // // Whitney 1-form basis functions
+      //    // auto w1 = [&](const Eigen::Vector3d& p) {
+      //    //    return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
+      //    // };
+      //    // auto w2 = [&](const Eigen::Vector3d& p) {
+      //    //    return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
+      //    // };
+      //    // auto w3 = [&](const Eigen::Vector3d& p) {
+      //    //    return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
+      //    // };
+
+      //    // // Effective curl-free current in this element
+      //    // Eigen::Vector3d j_df = (o1*edgeLength[e1]*edgeJCurl[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJCurl[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJCurl[e3] *w3(barycentre)) / sqrt(A);
+
+      //    Eigen::Vector3d rotatedVJ = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), barycentre.normalized()).toRotationMatrix() * Eigen::Vector3d(vJ[2*el], vJ[2*el+1], 0);
+      //    elementDivFreeCurrent[el] = rotatedVJ / sqrt(A);
       // }
 
-      // Now, likewise interpolate edge-localized J_DF to elements
-      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-         // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
-         std::array<uint32_t, 3>& corners = ionosphereGrid.elements[el].corners;
-         Real A = ionosphereGrid.elementArea(el);
+      // // Next, evaluate Sigma as a function of inplane-J and MLT
+      // #pragma omp parallel for
+      // for(uint n=0; n < nodes.size(); n++) {
+      //    Eigen::Vector3d J(0,0,0);
+      //    Eigen::Vector3d x(nodes[n].x.data());
 
-         // auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
-         // auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
-         // auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
+      //    Real totalA=0;
+      //    // Sum all incoming edges
+      //    for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
+      //       Real A = ionosphereGrid.elementArea(nodes[n].touchingElements[el]);
+      //       totalA += A;
+      //       J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
+      //    }
+      //    J/=totalA;
 
-         Eigen::Vector3d r0(ionosphereGrid.nodes[corners[0]].x.data());
-         Eigen::Vector3d r1(ionosphereGrid.nodes[corners[1]].x.data());
-         Eigen::Vector3d r2(ionosphereGrid.nodes[corners[2]].x.data());
+      //    Real MLT = atan2(x[1], x[0]) * 12 / M_PI + 12;
 
-         Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
+      //    // Formula 33 from Juusola et al 2025
+      //    // (in A/km)
+      //    J *= 1000;
+      //    Real SigmaH = c4H(MLT) * pow(J.norm(), c5H(MLT));
+      //    Real SigmaP = c4P(MLT) * pow(J.norm(), c5P(MLT));
 
-         // // Barycentric coordinates
-         // auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
-         //    return ((r0-p).cross(r1-p)).norm() / (2*A);
-         // };
-         // auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
-         //    return ((r1-p).cross(r2-p)).norm() / (2*A);
-         // };
-         // auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
-         //    return ((r2-p).cross(r0-p)).norm() / (2*A);
-         // };
+      //    nodes[n].parameters[ionosphereParameters::SIGMAP] = SigmaP;
+      //    nodes[n].parameters[ionosphereParameters::SIGMAH] = SigmaH;
+      // }
 
-         // // Barycentric gradients (these are constant per element)
-         // Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
-         // Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
-         // Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
+      // #pragma omp parallel for
+      // for(uint n=0; n<nodes.size(); n++) {
 
-         // // Whitney 1-form basis functions
-         // auto w1 = [&](const Eigen::Vector3d& p) {
-         //    return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
-         // };
-         // auto w2 = [&](const Eigen::Vector3d& p) {
-         //    return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
-         // };
-         // auto w3 = [&](const Eigen::Vector3d& p) {
-         //    return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
-         // };
+      //    if(nodes[n].openFieldLine > 0.5) {
+      //       // Ignore polar cap conductivity.
+      //       nodes[n].parameters[ionosphereParameters::SIGMAP] = 0;
+      //       nodes[n].parameters[ionosphereParameters::SIGMAH] = 0;
+      //    }
+      //    // Also add solar contribution
+      //    // Solar incidence parameter for calculating UV ionisation on the dayside
+      //    Real coschi = nodes[n].x[0] / Ionosphere::innerRadius;
+      //    Real chi = acos(coschi);
+      //    Real qprime = altcos(chi);
 
-         // // Effective curl-free current in this element
-         // Eigen::Vector3d j_df = (o1*edgeLength[e1]*edgeJCurl[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJCurl[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJCurl[e3] *w3(barycentre)) / sqrt(A);
+      //    const Real F10_7 = 100;
+      //    Real sigmaP_dayside = c1p * pow(F10_7, c2p) * pow(qprime, c3p);
+      //    Real sigmaH_dayside = c1h * pow(F10_7, c2h) * pow(qprime, c3h);
 
-         Eigen::Vector3d rotatedVJ = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), barycentre.normalized()).toRotationMatrix() * Eigen::Vector3d(vJ[2*el], vJ[2*el+1], 0);
-         elementDivFreeCurrent[el] = rotatedVJ / sqrt(A);
-      }
+      //    Real SigmaP = nodes[n].parameters[ionosphereParameters::SIGMAP];
+      //    Real SigmaH = nodes[n].parameters[ionosphereParameters::SIGMAH];
 
-      // Next, evaluate Sigma as a function of inplane-J and MLT
-      #pragma omp parallel for
-      for(uint n=0; n < nodes.size(); n++) {
-         Eigen::Vector3d J(0,0,0);
-         Eigen::Vector3d x(nodes[n].x.data());
+      //    nodes[n].parameters[ionosphereParameters::SIGMAP] = sqrt(SigmaP*SigmaP + sigmaP_dayside*sigmaP_dayside +0.625*0.625);
+      //    nodes[n].parameters[ionosphereParameters::SIGMAH] = sqrt(SigmaH*SigmaH + sigmaH_dayside*sigmaH_dayside +0.894*0.894);
 
-         Real totalA=0;
-         // Sum all incoming edges
-         for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
-            Real A = ionosphereGrid.elementArea(nodes[n].touchingElements[el]);
-            totalA += A;
-            J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
-         }
-         J/=totalA;
+      //    // TODO: We could instead directly calculate element conductivities using Whitney forms
+      //    // and don't need to go via sigma averaging here.
+      //    static const char epsilon[3][3][3] = {
+      //       {{0,0,0},{0,0,1},{0,-1,0}},
+      //       {{0,0,-1},{0,0,0},{1,0,0}},
+      //       {{0,1,0},{-1,0,0},{0,0,0}}
+      //    };
 
-         Real MLT = atan2(x[1], x[0]) * 12 / M_PI + 12;
-
-         // Formula 33 from Juusola et al 2025
-         // (in A/km)
-         J *= 1000;
-         Real SigmaH = c4H(MLT) * pow(J.norm(), c5H(MLT));
-         Real SigmaP = c4P(MLT) * pow(J.norm(), c5P(MLT));
-
-         nodes[n].parameters[ionosphereParameters::SIGMAP] = SigmaP;
-         nodes[n].parameters[ionosphereParameters::SIGMAH] = SigmaH;
-      }
-
-      #pragma omp parallel for
-      for(uint n=0; n<nodes.size(); n++) {
-
-         if(nodes[n].openFieldLine > 0.5) {
-            // Ignore polar cap conductivity.
-            nodes[n].parameters[ionosphereParameters::SIGMAP] = 0;
-            nodes[n].parameters[ionosphereParameters::SIGMAH] = 0;
-         }
-         // Also add solar contribution
-         // Solar incidence parameter for calculating UV ionisation on the dayside
-         Real coschi = nodes[n].x[0] / Ionosphere::innerRadius;
-         Real chi = acos(coschi);
-         Real qprime = altcos(chi);
-
-         const Real F10_7 = 100;
-         Real sigmaP_dayside = c1p * pow(F10_7, c2p) * pow(qprime, c3p);
-         Real sigmaH_dayside = c1h * pow(F10_7, c2h) * pow(qprime, c3h);
-
-         Real SigmaP = nodes[n].parameters[ionosphereParameters::SIGMAP];
-         Real SigmaH = nodes[n].parameters[ionosphereParameters::SIGMAH];
-
-         nodes[n].parameters[ionosphereParameters::SIGMAP] = sqrt(SigmaP*SigmaP + sigmaP_dayside*sigmaP_dayside +0.625*0.625);
-         nodes[n].parameters[ionosphereParameters::SIGMAH] = sqrt(SigmaH*SigmaH + sigmaH_dayside*sigmaH_dayside +0.894*0.894);
-
-         // TODO: We could instead directly calculate element conductivities using Whitney forms
-         // and don't need to go via sigma averaging here.
-         static const char epsilon[3][3][3] = {
-            {{0,0,0},{0,0,1},{0,-1,0}},
-            {{0,0,-1},{0,0,0},{1,0,0}},
-            {{0,1,0},{-1,0,0},{0,0,0}}
-         };
-
-         Eigen::Vector3d b(nodes[n].x.data());
-         b.normalize();
-         if(nodes[n].x[2] >= 0) {
-            b *= -1;
-         }
-         for(int i=0; i<3; i++) {
-            for(int j=0; j<3; j++) {
-               nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] = SigmaP * (((i==j)? 1. : 0.) - b[i]*b[j]);
-               for(int k=0; k<3; k++) {
-                  nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] -= SigmaH * epsilon[i][j][k]*b[k];
-               }
-            }
-         }
-      }
+      //    Eigen::Vector3d b(nodes[n].x.data());
+      //    b.normalize();
+      //    if(nodes[n].x[2] >= 0) {
+      //       b *= -1;
+      //    }
+      //    for(int i=0; i<3; i++) {
+      //       for(int j=0; j<3; j++) {
+      //          nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] = SigmaP * (((i==j)? 1. : 0.) - b[i]*b[j]);
+      //          for(int k=0; k<3; k++) {
+      //             nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] -= SigmaH * epsilon[i][j][k]*b[k];
+      //          }
+      //       }
+      //    }
+      // }
 
    } else {
       cerr << "Conductivity tensor " << sigmaString << " not implemented!" << endl;
@@ -1377,109 +1421,109 @@ int main(int argc, char** argv) {
    }
 
    // Write solver dependency matrix.
-   if(writeSolverMtarix) {
-      ofstream matrixOut("solverMatrix.txt");
-      for(uint n=0; n<nodes.size(); n++) {
-         for(uint m=0; m<nodes.size(); m++) {
+   // if(writeSolverMtarix) {
+   //    ofstream matrixOut("solverMatrix.txt");
+   //    for(uint n=0; n<nodes.size(); n++) {
+   //       for(uint m=0; m<nodes.size(); m++) {
 
-            Real val=0;
-            for(unsigned int d=0; d<nodes[n].numDepNodes; d++) {
-               if(nodes[n].dependingNodes[d] == m) {
-                  if(doPrecondition) {
-                     val=nodes[n].dependingCoeffs[d] / nodes[n].dependingCoeffs[0];
-                  } else {
-                     val=nodes[n].dependingCoeffs[d];
-                  }
-               }
-            }
+   //          Real val=0;
+   //          for(unsigned int d=0; d<nodes[n].numDepNodes; d++) {
+   //             if(nodes[n].dependingNodes[d] == m) {
+   //                if(doPrecondition) {
+   //                   val=nodes[n].dependingCoeffs[d] / nodes[n].dependingCoeffs[0];
+   //                } else {
+   //                   val=nodes[n].dependingCoeffs[d];
+   //                }
+   //             }
+   //          }
 
-            matrixOut << val << "\t";
-         }
-         matrixOut << endl;
-      }
-      if(!quiet) {
-         cout << "--- SOLVER DEPENDENCY MATRIX WRITTEN TO solverMatrix.txt ---" << endl;
-      }
-   }
+   //          matrixOut << val << "\t";
+   //       }
+   //       matrixOut << endl;
+   //    }
+   //    if(!quiet) {
+   //       cout << "--- SOLVER DEPENDENCY MATRIX WRITTEN TO solverMatrix.txt ---" << endl;
+   //    }
+   // }
 
-   ionosphereGrid.initSolver(true);
+   // ionosphereGrid.initSolver(true);
 
-   // Try to solve the system.
-   ionosphereGrid.isCouplingInwards=true;
-   Ionosphere::solverPreconditioning = doPrecondition;
-   Ionosphere::solverMaxFailureCount = 3;
-   ionosphereGrid.rank = 0;
-   int iterations, nRestarts;
-   Real residual = std::numeric_limits<Real>::max(), minPotentialN, minPotentialS, maxPotentialN, maxPotentialS;
+   // // Try to solve the system.
+   // ionosphereGrid.isCouplingInwards=true;
+   // Ionosphere::solverPreconditioning = doPrecondition;
+   // Ionosphere::solverMaxFailureCount = 3;
+   // ionosphereGrid.rank = 0;
+   // int iterations, nRestarts;
+   // Real residual = std::numeric_limits<Real>::max(), minPotentialN, minPotentialS, maxPotentialN, maxPotentialS;
 
-   // Measure solver timing
-   timeval tStart, tEnd;
-   gettimeofday(&tStart, NULL);
-   ionosphereGrid.solve(iterations, nRestarts, residual, minPotentialN, maxPotentialN, minPotentialS, maxPotentialS);
-   gettimeofday(&tEnd, NULL);
-   double solverTime = (tEnd.tv_sec - tStart.tv_sec) + (tEnd.tv_usec - tStart.tv_usec) / 1000000.0;
-   cout << "Own solver took " << solverTime << " seconds.\n";
+   // // Measure solver timing
+   // timeval tStart, tEnd;
+   // // gettimeofday(&tStart, NULL);
+   // // ionosphereGrid.solve(iterations, nRestarts, residual, minPotentialN, maxPotentialN, minPotentialS, maxPotentialS);
+   // // gettimeofday(&tEnd, NULL);
+   // double solverTime = 0;//(tEnd.tv_sec - tStart.tv_sec) + (tEnd.tv_usec - tStart.tv_usec) / 1000000.0;
+   // // cout << "Own solver took " << solverTime << " seconds.\n";
 
-   // Do the same solution using Eigen solver
-   Eigen::SparseMatrix<Real> potentialSolverMatrix(nodes.size(), nodes.size());
-   Eigen::VectorXd vRightHand(nodes.size()), vPhi(nodes.size());
-   for(uint n=0; n<nodes.size(); n++) {
+   // // Do the same solution using Eigen solver
+   // Eigen::SparseMatrix<Real> potentialSolverMatrix(nodes.size(), nodes.size());
+   // Eigen::VectorXd vRightHand(nodes.size()), vPhi(nodes.size());
+   // for(uint n=0; n<nodes.size(); n++) {
 
-      for(uint m=0; m<nodes[n].numDepNodes; m++) {
-         potentialSolverMatrix.insert(n, nodes[n].dependingNodes[m]) = nodes[n].dependingCoeffs[m];
-      }
+   //    for(uint m=0; m<nodes[n].numDepNodes; m++) {
+   //       potentialSolverMatrix.insert(n, nodes[n].dependingNodes[m]) = nodes[n].dependingCoeffs[m];
+   //    }
 
-      vRightHand[n] = nodes[n].parameters[ionosphereParameters::SOURCE];
-   }
-   gettimeofday(&tStart, NULL);
-   potentialSolverMatrix.makeCompressed();
-   Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
-   solver.compute(potentialSolverMatrix);
-   vPhi = solver.solve(vRightHand);
-   gettimeofday(&tEnd, NULL);
-   cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
-   solverTime = (tEnd.tv_sec - tStart.tv_sec) + (tEnd.tv_usec - tStart.tv_usec) / 1000000.0;
-   cout << "Eigen solver took " << solverTime << " seconds.\n";
+   //    vRightHand[n] = nodes[n].parameters[ionosphereParameters::SOURCE];
+   // }
+   // gettimeofday(&tStart, NULL);
+   // potentialSolverMatrix.makeCompressed(); 
+   // Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
+   // solver.compute(potentialSolverMatrix);
+   // vPhi = solver.solve(vRightHand);
+   // gettimeofday(&tEnd, NULL);
+   // cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
+   // solverTime = (tEnd.tv_sec - tStart.tv_sec) + (tEnd.tv_usec - tStart.tv_usec) / 1000000.0;
+   // cout << "Eigen solver took " << solverTime << " seconds.\n";
 
-   if(!quiet) {
-      cout << "Ionosphere solver: iterations " << iterations << " restarts " << nRestarts
-         << " residual " << std::scientific << residual << std::defaultfloat
-         << " potential min N = " << minPotentialN << " S = " << minPotentialS
-         << " max N = " << maxPotentialN << " S = " << maxPotentialS
-         << " difference N = " << maxPotentialN - minPotentialN << " S = " << maxPotentialS - minPotentialS
-         << endl;
-   } else {
-      if(multipoleL == 0) {
-         cout << std::scientific << residual << std::defaultfloat << std::endl;
-      } else {
-         // Actually corellate with our input multipole
-         Real correlate=0;
-         Real selfNorm=0;
-         Real sphNorm =0;
-         Real totalArea = 0;
-         for(uint n=0; n<nodes.size(); n++) {
-            double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
-            double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
+   // if(!quiet) {
+   //    cout << "Ionosphere solver: iterations " << iterations << " restarts " << nRestarts
+   //       << " residual " << std::scientific << residual << std::defaultfloat
+   //       << " potential min N = " << minPotentialN << " S = " << minPotentialS
+   //       << " max N = " << maxPotentialN << " S = " << maxPotentialS
+   //       << " difference N = " << maxPotentialN - minPotentialN << " S = " << maxPotentialS - minPotentialS
+   //       << endl;
+   // } else {
+   //    if(multipoleL == 0) {
+   //       cout << std::scientific << residual << std::defaultfloat << std::endl;
+   //    } else {
+   //       // Actually corellate with our input multipole
+   //       Real correlate=0;
+   //       Real selfNorm=0;
+   //       Real sphNorm =0;
+   //       Real totalArea = 0;
+   //       for(uint n=0; n<nodes.size(); n++) {
+   //          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
+   //          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
-            Real area = 0;
-            for(uint e=0; e<ionosphereGrid.nodes[n].numTouchingElements; e++) {
-               area += ionosphereGrid.elementArea(ionosphereGrid.nodes[n].touchingElements[e]);
-            }
-            area /= 3.; // As every element has 3 corners, don't double-count areas
+   //          Real area = 0;
+   //          for(uint e=0; e<ionosphereGrid.nodes[n].numTouchingElements; e++) {
+   //             area += ionosphereGrid.elementArea(ionosphereGrid.nodes[n].touchingElements[e]);
+   //          }
+   //          area /= 3.; // As every element has 3 corners, don't double-count areas
 
-            totalArea += area;
-            selfNorm += pow(nodes[n].parameters[ionosphereParameters::SOLUTION],2.) * area;
-            sphNorm += pow(sph_legendre(multipoleL,fabs(multipolem),theta) * cos(multipolem*phi), 2.) * area;
-            correlate += nodes[n].parameters[ionosphereParameters::SOLUTION] * sph_legendre(multipoleL,fabs(multipolem),theta) * cos(multipolem*phi) * area;
-         }
+   //          totalArea += area;
+   //          selfNorm += pow(nodes[n].parameters[ionosphereParameters::SOLUTION],2.) * area;
+   //          sphNorm += pow(sph_legendre(multipoleL,fabs(multipolem),theta) * cos(multipolem*phi), 2.) * area;
+   //          correlate += nodes[n].parameters[ionosphereParameters::SOLUTION] * sph_legendre(multipoleL,fabs(multipolem),theta) * cos(multipolem*phi) * area;
+   //       }
 
-         selfNorm = sqrt(selfNorm/totalArea);
-         sphNorm = sqrt(sphNorm/totalArea);
-         correlate /= totalArea * selfNorm * sphNorm;
+   //       selfNorm = sqrt(selfNorm/totalArea);
+   //       sphNorm = sqrt(sphNorm/totalArea);
+   //       correlate /= totalArea * selfNorm * sphNorm;
 
-         cout << std::scientific << correlate << std::defaultfloat << std::endl;
-      }
-   }
+   //       cout << std::scientific << correlate << std::defaultfloat << std::endl;
+   //    }
+   // }
 
    // Write output
    vlsv::Writer outputFile;
@@ -1491,18 +1535,74 @@ int main(int argc, char** argv) {
 
    // Data reducers
    DataReducer outputDROs;
-   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_fac", [](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
-         std::vector<Real> retval(grid.nodes.size());
+   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_facelement", [](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
+         std::vector<Real> retval(grid.elements.size());
 
-         for (uint i = 0; i < grid.nodes.size(); i++) {
-            Real area = 0;
-            for (uint e = 0; e < grid.nodes[i].numTouchingElements; e++) {
-               area += grid.elementArea(grid.nodes[i].touchingElements[e]);
-            }
-            area /= 3.; // As every element has 3 corners, don't double-count areas
-            retval[i] = grid.nodes[i].parameters[ionosphereParameters::SOURCE] / area;
+         for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+         
+         // Distribute FACs by area ratios
+         SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
+         Real A = ionosphereGrid.elementArea(el);
+
+         int i=element.corners[0],j=element.corners[1],k=element.corners[2];
+
+         Real A1 = 0, A2 = 0, A3 = 0;
+         for(uint e=0; e<ionosphereGrid.nodes[i].numTouchingElements; e++) {
+            A1 += ionosphereGrid.elementArea(ionosphereGrid.nodes[i].touchingElements[e]);
+         }
+         for(uint e=0; e<ionosphereGrid.nodes[j].numTouchingElements; e++) {
+            A2 += ionosphereGrid.elementArea(ionosphereGrid.nodes[j].touchingElements[e]);
+         }
+         for(uint e=0; e<ionosphereGrid.nodes[k].numTouchingElements; e++) {
+            A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
          }
 
+
+         retval[el] = (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
+              + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
+              + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
+         }
+
+         return retval;
+   }));
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_rowsum", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
+         std::vector<Real> retval(grid.elements.size());
+
+         //sum of row corresponding to element in matrix curlSolverMatrix
+         for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+            retval[el] = 0;
+            for(uint m=0; m<2*ionosphereGrid.elements.size(); m++) {
+               retval[el] += curlSolverMatrix.coeff(el,m)*curlSolverMatrix.coeff(el,m);
+            }
+         }
+ 
+         return retval;
+   })); 
+    
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_vRHS2", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
+         std::vector<Real> retval(grid.elements.size());
+
+         //sum of row corresponding to element in matrix curlSolverMatrix
+         for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+            retval[el] = vRHS2[el];
+         }
+ 
+         return retval;
+   }));
+        outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_ratio", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
+         std::vector<Real> retval(grid.elements.size());
+
+         for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+            retval[el] = 0;
+            for(uint m=0; m<2*ionosphereGrid.elements.size(); m++) {
+               retval[el] += curlSolverMatrix.coeff(el,m)*curlSolverMatrix.coeff(el,m);
+            }
+         }
+
+         for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+            retval[el] /= vRHS2[el];
+         }
+ 
          return retval;
    }));
    outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_source", [](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
@@ -1514,105 +1614,105 @@ int main(int argc, char** argv) {
 
          return retval;
    }));
-   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_openclosed", [](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
-         std::vector<Real> retval(grid.nodes.size());
+   // outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_openclosed", [](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
+   //       std::vector<Real> retval(grid.nodes.size());
 
-         for (uint i = 0; i < grid.nodes.size(); i++) {
-            retval[i] = grid.nodes[i].openFieldLine;
-         }
+   //       for (uint i = 0; i < grid.nodes.size(); i++) {
+   //          retval[i] = grid.nodes[i].openFieldLine;
+   //       }
 
-         return retval;
-   }));
-   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_potential", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+   //       return retval;
+   // }));
+   // outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_potential", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-         std::vector<Real> retval(grid.nodes.size());
+   //       std::vector<Real> retval(grid.nodes.size());
 
-         for(uint i=0; i<grid.nodes.size(); i++) {
-            retval[i] = grid.nodes[i].parameters[ionosphereParameters::SOLUTION];
-         }
+   //       for(uint i=0; i<grid.nodes.size(); i++) {
+   //          retval[i] = grid.nodes[i].parameters[ionosphereParameters::SOLUTION];
+   //       }
 
-         return retval;
-   }));
-   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_EigenPotential", [&vPhi](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+   //       return retval;
+   // }));
+   // outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_EigenPotential", [&vPhi](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-         std::vector<Real> retval(grid.nodes.size());
+   //       std::vector<Real> retval(grid.nodes.size());
 
-         for(uint i=0; i<grid.nodes.size(); i++) {
-            retval[i] = vPhi[i];
-         }
+   //       for(uint i=0; i<grid.nodes.size(); i++) {
+   //          retval[i] = vPhi[i];
+   //       }
 
-         return retval;
-   }));
-   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_residual", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+   //       return retval;
+   // }));
+   // outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_residual", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-         std::vector<Real> retval(grid.nodes.size());
+   //       std::vector<Real> retval(grid.nodes.size());
 
-         for(uint i=0; i<grid.nodes.size(); i++) {
-            retval[i] = grid.nodes[i].parameters[ionosphereParameters::RESIDUAL];
-         }
+   //       for(uint i=0; i<grid.nodes.size(); i++) {
+   //          retval[i] = grid.nodes[i].parameters[ionosphereParameters::RESIDUAL];
+   //       }
 
-         return retval;
-   }));
-   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_sigmah", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+   //       return retval;
+   // }));
+   // outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_sigmah", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-         std::vector<Real> retval(grid.nodes.size());
+   //       std::vector<Real> retval(grid.nodes.size());
 
-         for(uint i=0; i<grid.nodes.size(); i++) {
-            retval[i] = grid.nodes[i].parameters[ionosphereParameters::SIGMAH];
-         }
+   //       for(uint i=0; i<grid.nodes.size(); i++) {
+   //          retval[i] = grid.nodes[i].parameters[ionosphereParameters::SIGMAH];
+   //       }
 
-         return retval;
-   }));
-   outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_sigmap", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+   //       return retval;
+   // }));
+   // outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_sigmap", [](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-         std::vector<Real> retval(grid.nodes.size());
+   //       std::vector<Real> retval(grid.nodes.size());
 
-         for(uint i=0; i<grid.nodes.size(); i++) {
-            retval[i] = grid.nodes[i].parameters[ionosphereParameters::SIGMAP];
-         }
+   //       for(uint i=0; i<grid.nodes.size(); i++) {
+   //          retval[i] = grid.nodes[i].parameters[ionosphereParameters::SIGMAP];
+   //       }
 
-         return retval;
-   }));
-   if(runCurlJSolver) {
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromCurlJ", [&edgeIndex, &edgeLength,&elementDivFreeCurrent](
-                  SBC::SphericalTriGrid& grid)->std::vector<Real> {
+   //       return retval;
+   // }));
+   // if(runCurlJSolver) {
+   //    outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromCurlJ", [&edgeIndex, &edgeLength,&elementDivFreeCurrent](
+   //                SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-         std::vector<Real> retval(grid.elements.size()*3);
+   //       std::vector<Real> retval(grid.elements.size()*3);
 
-         for(uint i=0; i<grid.elements.size(); i++) {
-            Eigen::Vector3d j=elementDivFreeCurrent[i];
-            for(int n=0; n<3; n++) {
-               retval[3*i + n] = j[n];
-            }
-         }
+   //       for(uint i=0; i<grid.elements.size(); i++) {
+   //          Eigen::Vector3d j=elementDivFreeCurrent[i];
+   //          for(int n=0; n<3; n++) {
+   //             retval[3*i + n] = j[n];
+   //          }
+   //       }
 
-         return retval;
-      }));
+   //       return retval;
+   //    }));
 
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_jFromCurlJNode", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+   //    outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_jFromCurlJNode", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-            std::vector<Real> retval(3*grid.nodes.size());
+   //          std::vector<Real> retval(3*grid.nodes.size());
 
-            for(uint n=0; n<grid.nodes.size(); n++) {
-               Eigen::Vector3d J(0,0,0);
+   //          for(uint n=0; n<grid.nodes.size(); n++) {
+   //             Eigen::Vector3d J(0,0,0);
 
-               Real totalA=0;
-               // Sum all incoming edges
-               for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
-                  Real A = grid.elementArea(nodes[n].touchingElements[el]);
-                  totalA += A;
-                  J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
-               }
-               J/=totalA;
+   //             Real totalA=0;
+   //             // Sum all incoming edges
+   //             for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
+   //                Real A = grid.elementArea(nodes[n].touchingElements[el]);
+   //                totalA += A;
+   //                J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
+   //             }
+   //             J/=totalA;
 
 
-               retval[3*n] = J[0];
-               retval[3*n+1] = J[1];
-               retval[3*n+2] = J[2];
-            }
+   //             retval[3*n] = J[0];
+   //             retval[3*n+1] = J[1];
+   //             retval[3*n+2] = J[2];
+   //          }
 
-            return retval;
-      }));
+   //          return retval;
+   //    }));
       // outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_jFromDivJNode", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
       //       std::vector<Real> retval(3*grid.nodes.size());
@@ -1697,7 +1797,7 @@ int main(int argc, char** argv) {
       //      }
       //      return retval;
       //}));
-   }
+   // }
 
    for(unsigned int i=0; i<outputDROs.size(); i++) {
       outputDROs.writeIonosphereGridData(ionosphereGrid, "ionosphere", i, outputFile);
