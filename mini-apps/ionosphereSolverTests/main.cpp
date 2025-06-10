@@ -51,13 +51,48 @@ Eigen::Vector3d getElementBarycentre(SphericalTriGrid& grid, uint32_t el) {
    }
    barycentre /= 3.;
 
+   // // Return the circumcenter of the triangle defined by the element corners
+   // Eigen::Vector3d a(grid.nodes[grid.elements[el].corners[0]].x.data());
+   // Eigen::Vector3d b(grid.nodes[grid.elements[el].corners[1]].x.data());
+   // Eigen::Vector3d c(grid.nodes[grid.elements[el].corners[2]].x.data());
+
+   // Eigen::Vector3d ab = b - a;
+   // Eigen::Vector3d ac = c - a; 
+   // Eigen::Vector3d ab_perp = Eigen::Vector3d(-ab.y(), ab.x(), 0).normalized();
+   // Eigen::Vector3d ac_perp = Eigen::Vector3d(-ac.y(), ac.x(), 0).normalized();
+   // Eigen::Vector3d circumcenter = a + ab / 2. + ac / 2. + (ab_perp + ac_perp) * (ab.norm() * ac.norm()) / (2. * (ab.cross(ac)).norm());
+
    return barycentre;
 }
 
+// Element Barycentre
+Eigen::Vector3d getElementNormal(SphericalTriGrid& grid, uint32_t el) {
+   Eigen::Vector3d normal(0,0,0);
 
-// How much of the line connecting the barycentres of two elements
-// to the midpoint of the common edge of the two elements is 
-// contained in each element
+   SphericalTriGrid::Element& element = grid.elements[el];
+   uint32_t corner1 = element.corners[0];
+   uint32_t corner2 = element.corners[1];
+   uint32_t corner3 = element.corners[2];
+
+   Eigen::Vector3d a(grid.nodes[corner1].x.data());
+   Eigen::Vector3d b(grid.nodes[corner2].x.data());
+   Eigen::Vector3d c(grid.nodes[corner3].x.data());
+
+   Eigen::Vector3d edge1 = b - a;
+   Eigen::Vector3d edge2 = c - a;
+
+   normal = edge1.cross(edge2);
+
+   normal.normalize();
+
+   if(normal.dot(getElementBarycentre(grid, el)) < 0) {
+      normal *= -1.;
+   }
+
+   return normal;
+}
+
+
 std::tuple<Real, Real> getConnectingSegmentLengths(SphericalTriGrid& grid, uint32_t el1, uint32_t el2) {
    SphericalTriGrid::Element& element1 = grid.elements[el1];
    SphericalTriGrid::Element& element2 = grid.elements[el2];
@@ -75,23 +110,169 @@ std::tuple<Real, Real> getConnectingSegmentLengths(SphericalTriGrid& grid, uint3
                           element1.corners[j] == element2.corners[1] ||
                           element1.corners[j] == element2.corners[2])) {
 
-                  uint32_t corner1 = element1.corners[i];
-                  uint32_t corner2 = element1.corners[j];
-                  // printf("Common edge: %d - %d\n", corner1, corner2);
-                  Eigen::Vector3d corner1Pos(grid.nodes[corner1].x.data());
-                  Eigen::Vector3d corner2Pos(grid.nodes[corner2].x.data());
-                  Eigen::Vector3d edgeMidpoint = (corner1Pos + corner2Pos) / 2.;
+                  uint corner1 = element1.corners[i];
+                  uint corner2 = element1.corners[j];
+                  uint apex1 = element1.corners[(3 - i - j) % 3];
+                  
+                  uint i2 = (corner1 == element2.corners[1]) + 2 * (corner1 == element2.corners[2]);
+                  uint j2 = (corner2 == element2.corners[1]) + 2 * (corner2 == element2.corners[2]);
+                  uint apex2 = element2.corners[(3 - i2 - j2) % 3];
 
-                  Real length1 = (edgeMidpoint - barycentre1).norm();
-                  Real length2 = (edgeMidpoint - barycentre2).norm();
+                  Eigen::Vector3d normal1 = getElementNormal(grid, el1);
+                  Eigen::Vector3d normal2 = getElementNormal(grid, el2);
+ 
+                  // Eigen::Vector3d rotatedApex2 = Eigen::Vector3d(grid.nodes[corner1].x.data()) + Eigen::Quaternion<Real>::FromTwoVectors(normal2, normal1).toRotationMatrix() * (Eigen::Vector3d(grid.nodes[apex2].x.data()) - Eigen::Vector3d(grid.nodes[corner1].x.data()));
+                  Eigen::Vector3d rotatedBarycentre2 =  Eigen::Vector3d(grid.nodes[corner1].x.data()) + 
+                                                         Eigen::Quaternion<Real>::FromTwoVectors(normal2, normal1).toRotationMatrix() * 
+                                                         (barycentre2 - Eigen::Vector3d(grid.nodes[corner1].x.data()));
+  
+                  // Rotate everything to align with the xy axis
+                  // barycentre1 = Eigen::Quaternion<Real>::FromTwoVectors(normal1, Eigen::Vector3d(0,0,1)).toRotationMatrix() * barycentre1;
+                  // rotatedBarycentre2 = Eigen::Quaternion<Real>::FromTwoVectors(normal1, Eigen::Vector3d(0,0,1)).toRotationMatrix() * rotatedBarycentre2;
 
+                  Eigen::Vector3d corner1Position(grid.nodes[corner1].x.data());
+                  Eigen::Vector3d corner2Position(grid.nodes[corner2].x.data());
+
+
+                  // corner1Position = Eigen::Quaternion<Real>::FromTwoVectors(normal1, Eigen::Vector3d(0,0,1)).toRotationMatrix() * corner1Position;
+
+                  // Eigen::Vector3d apex1ToCorner1 = (Eigen::Vector3d(grid.nodes[corner1].x.data()) - Eigen::Vector3d(grid.nodes[apex1].x.data()));
+                  // Eigen::Vector3d apex2ToCorner1 = (Eigen::Vector3d(grid.nodes[corner1].x.data()) - rotatedApex2);
+                   
+                  //Check that the cross product of apex1ToCorner1 and apex2ToCorner1 is the same as normal1
+                  // Eigen::Vector3d crossProduct = (apex2ToCorner1.cross(apex1ToCorner1).normalized());
+                  // if(crossProduct.dot(normal1) < 0) {
+                  //    crossProduct *= -1;
+                  // }
+
+                  // if((crossProduct - normal1).norm() > 1e-6) {
+                  //    printf("Cross product does not match normal %lf\n", (crossProduct - normal1).norm());
+                  //    printf("Cross product: %lf, %lf, %lf\n", crossProduct.x(), crossProduct.y(), crossProduct.z());
+                  //    printf("Normal1: %lf, %lf, %lf\n", normal1.x(), normal1.y(), normal1.z());
+                  // }
+                  
+                  Eigen::Vector3d barycentre1ToCorner1 = (corner1Position - barycentre1);
+                  Eigen::Vector3d barycentre2ToCorner1 = (corner1Position - rotatedBarycentre2);
+                  Eigen::Vector3d barycentre1ToBarycentre2 = (rotatedBarycentre2 - barycentre1).normalized();
+                  Eigen::Vector3d corner1ToCorner2 = (corner2Position - corner1Position).normalized();
+                  // Eigen::Vector3d apex1ToApex2 = (rotatedApex2 - Eigen::Vector3d(grid.nodes[apex1].x.data()));
+                  //Check that the cross product of apex1ToApex2 and apex1ToCorner1 is the same as normal1
+                  // Eigen::Vector3d crossProduct = (apex1ToApex2.cross(apex1ToCorner1).normalized());
+                  // if(crossProduct.dot(normal1) < 0) {
+                  //    crossProduct *= -1;
+                  // }
+                  // if((crossProduct - normal1).norm() > 1e-6) {
+                  //    printf("Cross product does not match normal %lf\n", (crossProduct - normal1).norm());
+                  //    printf("Cross product: %lf, %lf, %lf\n", crossProduct.x(), crossProduct.y(), crossProduct.z());
+                  //    printf("Normal1: %lf, %lf, %lf\n", normal1.x(), normal1.y(), normal1.z());
+                  // }
+
+                  // Get intersection of line between barycenters and line between corners
+                  Eigen::Matrix<double, 3, 2> A;
+                  A.col(0) = barycentre1ToBarycentre2;
+                  A.col(1) = - corner1ToCorner2;
+                  Eigen::Vector3d b = corner1Position - barycentre1;
+
+
+                  Eigen::Vector2d t = A.colPivHouseholderQr().solve(b);
+                  Eigen::Vector3d residual = A * t - b;
+                  if (residual.norm() > 1e-6) {
+                     printf("Residual norm is too high: %lf\n", residual.norm());
+                  }
+
+                  // Verify that the solution is correct
+                  Eigen::Vector3d intersection = barycentre1 + t(0) * barycentre1ToBarycentre2;
+                  Eigen::Vector3d intersection2 = corner1Position + t(1) * corner1ToCorner2;
+                  if((intersection - intersection2).norm() > 1e-6) {
+                     printf("Intersection points do not match: %lf\n", (intersection - intersection2).norm());
+                     printf("Intersection 1: %lf, %lf, %lf\n", intersection.x(), intersection.y(), intersection.z());
+                     printf("Intersection 2: %lf, %lf, %lf\n", intersection2.x(), intersection2.y(), intersection2.z());
+                     printf("A col 0: %lf, %lf, %lf\n", A.col(0).x(), A.col(0).y(), A.col(0).z());
+                     printf("A col 1: %lf, %lf, %lf\n", A.col(1).x(), A.col(1).y(), A.col(1).z());
+                     printf("t0: %lf, t1: %lf\n", t(0), t(1));
+                     printf("b0: %lf, b1: %lf, b2: %lf\n", b.x(), b.y(), b.z());
+                  }
+                  
+                  Real length1 = (barycentre1 - intersection).norm();
+                  Real length2 = (rotatedBarycentre2 - intersection).norm();
+                  
+
+                  // Ensure lengths are positive
+                  // if(length1 < 0) length1 *= -1;
+                  // if(length2 < 0) length2 *= -1;
+
+                  // Eigen::Vector3d barycentre2 = getElementBarycentre(grid, el2);
+                  // if(el1 == 221){
+                  //    printf("Element 1: %d, Element 2: %d\n", el1, el2);
+                  //    printf("Corner 1: %d, Corner 2: %d\n", corner1, corner2);
+                  //    printf("Corner 1 Position: %lf, %lf, %lf\n", grid.nodes[corner1].x[0], grid.nodes[corner1].x[1], grid.nodes[corner1].x[2]);
+                  //    printf("Corner 2 Position: %lf, %lf, %lf\n", grid.nodes[corner2].x[0], grid.nodes[corner2].x[1], grid.nodes[corner2].x[2]);
+                  //    printf("Apex 1 position: %lf, %lf, %lf\n", grid.nodes[apex1].x[0], grid.nodes[apex1].x[1], grid.nodes[apex1].x[2]);
+                  //    printf("Apex 2 position: %lf, %lf, %lf\n", grid.nodes[apex2].x[0], grid.nodes[apex2].x[1], grid.nodes[apex2].x[2]); 
+                  //    printf("Barycentre 1: %lf, %lf, %lf\n", barycentre1.x(), barycentre1.y(), barycentre1.z());
+                  //    printf("Barycentre 2: %lf, %lf, %lf\n", barycentre2.x(), barycentre2.y(), barycentre2.z());
+                  //    printf("Rotated Barycentre 2: %lf, %lf, %lf\n", rotatedBarycentre2.x(), rotatedBarycentre2.y(), rotatedBarycentre2.z());
+                  //    printf("Barycentre 1 to Corner 1: %lf, %lf, %lf\n", barycentre1ToCorner1.x(), barycentre1ToCorner1.y(), barycentre1ToCorner1.z());
+                  //    printf("Barycentre 2 to Corner 1: %lf, %lf, %lf\n", barycentre2ToCorner1.x(), barycentre2ToCorner1.y(), barycentre2ToCorner1.z());
+                  //    printf("Barycentre 1 to Barycentre 2: %lf, %lf, %lf\n", barycentre1ToBarycentre2.x(), barycentre1ToBarycentre2.y(), barycentre1ToBarycentre2.z());
+                  //    printf("Intersection: %lf, %lf, %lf\n", intersection.x(), intersection.y(), intersection.z());
+                  //    printf("Length 1: %lf, Length 2: %lf\n", length1, length2);
+                  // }
                   return std::make_tuple(length1, length2); 
             }
          }
-      } 
+      }  
    }  
 }
 
+
+Real getDualPolygonArea(SphericalTriGrid& grid, uint gridNode){
+   Real A = 0.;
+   for(uint i = 0; i < grid.nodes[gridNode].numTouchingElements; i++){
+      uint32_t gridEl = grid.nodes[gridNode].touchingElements[i];
+      Eigen::Vector3d nodePosition(grid.nodes[gridNode].x.data());
+      SphericalTriGrid::Element& element = grid.elements[gridEl];
+
+      int gridI=0,gridJ=0;
+      int localC=0,localI=0,localJ=0;
+      for(int c=0; c < 3; c++) {
+         if(element.corners[c] == gridNode) {
+            localC = c;
+            localI = (c+1)%3;
+            gridI=element.corners[localI];
+            localJ = (c+2)%3;
+            gridJ=element.corners[localJ];
+            break;
+         }
+      }
+
+      uint otherElementi = ionosphereGrid.findElementNeighbour(gridEl, localC, localI);
+      uint otherElementj = ionosphereGrid.findElementNeighbour(gridEl, localC, localJ);
+
+      Eigen::Vector3d centerm = getElementBarycentre(ionosphereGrid, gridEl);
+      Eigen::Vector3d centeri = getElementBarycentre(ionosphereGrid, otherElementi);
+      Eigen::Vector3d centerj = getElementBarycentre(ionosphereGrid, otherElementj);
+
+      Eigen::Vector3d normalm = getElementNormal(ionosphereGrid, gridEl);
+      Eigen::Vector3d normali = getElementNormal(ionosphereGrid, otherElementi);
+      Eigen::Vector3d normalj = getElementNormal(ionosphereGrid, otherElementj);
+
+      Eigen::Vector3d rotatedCenteri = nodePosition + Eigen::Quaternion<Real>::FromTwoVectors(normali, normalm).toRotationMatrix() * (centeri - nodePosition);
+      Eigen::Vector3d rotatedCenterj = nodePosition + Eigen::Quaternion<Real>::FromTwoVectors(normalj, normalm).toRotationMatrix() * (centerj - nodePosition);
+
+      Eigen::Vector3d edgeNodeM = nodePosition - centerm;
+      Eigen::Vector3d edgeNodeI = nodePosition - rotatedCenteri;
+      Eigen::Vector3d edgeNodeJ = nodePosition - rotatedCenterj;
+
+      Real areaMI = edgeNodeM.cross(edgeNodeI).norm() / 2.;
+      Real areaMJ = edgeNodeM.cross(edgeNodeJ).norm() / 2.;
+
+      // Double counting
+      A += (areaMI + areaMJ) / 2.; 
+
+   }
+   return A;
+}
 
 // Ionosoheric Sigma calculation function coefficients from
 // Juusola et al. 2025
@@ -661,18 +842,22 @@ int main(int argc, char** argv) {
    // Set FACs
    if(facString == "constant") {
       for(uint n=0; n<nodes.size(); n++) {
-         nodes[n].parameters[ionosphereParameters::SOURCE] = 1;
+         if(n == 16){
+            nodes[n].parameters[ionosphereParameters::SOURCE] = 1;
+         } else {
+            nodes[n].parameters[ionosphereParameters::SOURCE] = 0;
+         }
+
+         Real area = getDualPolygonArea(ionosphereGrid, n);
+
+         nodes[n].parameters[ionosphereParameters::SOURCE] *= area;
       }
    } else if(facString == "dipole") {
       for(uint n=0; n<nodes.size(); n++) {
          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
-         Real area = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[n].numTouchingElements; e++) {
-            area += ionosphereGrid.elementArea(ionosphereGrid.nodes[n].touchingElements[e]);
-         }
-         area /= 3.; // As every element has 3 corners, don't double-count areas
+         Real area = getDualPolygonArea(ionosphereGrid, n);
 
          nodes[n].parameters[ionosphereParameters::SOURCE] = sph_legendre(1,0,theta) * cos(0*phi) * area;
       }
@@ -681,11 +866,8 @@ int main(int argc, char** argv) {
          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
-         Real area = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[n].numTouchingElements; e++) {
-            area += ionosphereGrid.elementArea(ionosphereGrid.nodes[n].touchingElements[e]);
-         }
-         area /= 3.; // As every element has 3 corners, don't double-count areas
+         
+         Real area = getDualPolygonArea(ionosphereGrid, n);
 
          nodes[n].parameters[ionosphereParameters::SOURCE] = sph_legendre(2,1,theta) * cos(1*phi) * area;
       }
@@ -694,11 +876,8 @@ int main(int argc, char** argv) {
          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
-         Real area = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[n].numTouchingElements; e++) {
-            area += ionosphereGrid.elementArea(ionosphereGrid.nodes[n].touchingElements[e]);
-         }
-         area /= 3.; // As every element has 3 corners, don't double-count areas
+         
+         Real area = getDualPolygonArea(ionosphereGrid, n);
 
          nodes[n].parameters[ionosphereParameters::SOURCE] = sph_legendre(3,2,theta) * cos(2*phi) * area;
       }
@@ -707,11 +886,8 @@ int main(int argc, char** argv) {
          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
-         Real area = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[n].numTouchingElements; e++) {
-            area += ionosphereGrid.elementArea(ionosphereGrid.nodes[n].touchingElements[e]);
-         }
-         area /= 3.; // As every element has 3 corners, don't double-count areas
+         
+         Real area = getDualPolygonArea(ionosphereGrid, n);
 
          nodes[n].parameters[ionosphereParameters::SOURCE] = sph_legendre(4,3,theta) * cos(3*phi) * area;
       }
@@ -720,11 +896,8 @@ int main(int argc, char** argv) {
          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
-         Real area = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[n].numTouchingElements; e++) {
-            area += ionosphereGrid.elementArea(ionosphereGrid.nodes[n].touchingElements[e]);
-         }
-         area /= 3.; // As every element has 3 corners, don't double-count areas
+         
+         Real area = getDualPolygonArea(ionosphereGrid, n);
 
          nodes[n].parameters[ionosphereParameters::SOURCE] = sph_legendre(multipoleL,fabs(multipolem),theta) * cos(multipolem*phi) * area;
       }
@@ -739,11 +912,8 @@ int main(int argc, char** argv) {
          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
-         Real area = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[n].numTouchingElements; e++) {
-            area += ionosphereGrid.elementArea(ionosphereGrid.nodes[n].touchingElements[e]);
-         }
-         area /= 3.; // As every element has 3 corners, don't double-count areas
+         
+         Real area = getDualPolygonArea(ionosphereGrid, n);
 
          double j_parallel=0;
 
@@ -765,11 +935,8 @@ int main(int argc, char** argv) {
          cerr << "Read file." << endl;
       }
       for(uint i=0; i<ionosphereGrid.nodes.size(); i++) {
-         Real area = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[i].numTouchingElements; e++) {
-            area += ionosphereGrid.elementArea(ionosphereGrid.nodes[i].touchingElements[e]);
-         }
-         area /= 3.; // As every element has 3 corners, don't double-count areas
+         
+         Real area = getDualPolygonArea(ionosphereGrid, i);
          ionosphereGrid.nodes[i].parameters[ionosphereParameters::SOURCE] *= area;
       } 
       // Also read open/closed information from the file, if it exists.
@@ -918,28 +1085,46 @@ int main(int argc, char** argv) {
 
          
          // Distribute FACs by area ratios
-         SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
-         Real A = ionosphereGrid.elementArea(el);
+         SphericalTriGrid::Element& elelement = ionosphereGrid.elements[el];
          Real elArea = ionosphereGrid.elementArea(el);
 
-         int i=element.corners[0],j=element.corners[1],k=element.corners[2];
+         int i=elelement.corners[0],j=elelement.corners[1],k=elelement.corners[2];
 
-         Real A1 = 0, A2 = 0, A3 = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[i].numTouchingElements; e++) {
-            A1 += ionosphereGrid.elementArea(ionosphereGrid.nodes[i].touchingElements[e]);
-         }
-         for(uint e=0; e<ionosphereGrid.nodes[j].numTouchingElements; e++) {
-            A2 += ionosphereGrid.elementArea(ionosphereGrid.nodes[j].touchingElements[e]);
-         }
-         for(uint e=0; e<ionosphereGrid.nodes[k].numTouchingElements; e++) {
-            A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
-         }
+         Real A1 = getDualPolygonArea(ionosphereGrid, i);
+         Real A2 = getDualPolygonArea(ionosphereGrid, j);
+         Real A3 = getDualPolygonArea(ionosphereGrid, k);
 
-         printf("VRHS Element %d: A = %le, A1 = %le, A2 = %le, A3 = %le\n", el, A, A1, A2, A3);
-         vRHS2[el] = (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
-              + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
-              + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
-
+         // printf("Right-hand side for element %d: \n", el);
+         // printf("VRHS Element %d: \nA = %le, \nA1 = %le, \nA2 = %le, \nA3 = %le\n", el, elArea, A1, A2, A3);
+         // printf("node0 %le, node1 = %le, node2 = %le\n",
+         //        elelement.corners[0],
+         //        elelement.corners[1],
+         //        elelement.corners[2]);
+         // printf("node0.source = %le, node1.source = %le, node2.source = %le\n",
+         //        nodes[elelement.corners[0]].parameters[ionosphereParameters::SOURCE],
+         //        nodes[elelement.corners[1]].parameters[ionosphereParameters::SOURCE],
+         //        nodes[elelement.corners[2]].parameters[ionosphereParameters::SOURCE]);
+         // printf("node0.source*A/A1 = %le, node1.source*A/A2 = %le, node2.source*A/A3 = %le\n",
+         //        nodes[elelement.corners[0]].parameters[ionosphereParameters::SOURCE] * elArea/A1,
+         //        nodes[elelement.corners[1]].parameters[ionosphereParameters::SOURCE] * elArea/A2,
+         //        nodes[elelement.corners[2]].parameters[ionosphereParameters::SOURCE] * elArea/A3);
+         vRHS2[el] = (nodes[elelement.corners[0]].parameters[ionosphereParameters::SOURCE] * elArea/A1
+              + nodes[elelement.corners[1]].parameters[ionosphereParameters::SOURCE] * elArea/A2
+              + nodes[elelement.corners[2]].parameters[ionosphereParameters::SOURCE] * elArea/A3);
+         // printf("vRHS1[%d] = %le\n", el, vRHS2[el]);
+         //print out areas
+         // printf("element %d: A = %le, A1 = %le, A2 = %le, A3 = %le\n", el, A, A1, A2, A3);
+         // printf("A/A1 = %le, A/A2 = %le, A/A3 = %le\n",
+         //        A/A1, A/A2, A/A3);
+         // printf("node0.source = %le, node1.source = %le, node2.source = %le\n",
+         //        nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE],
+         //        nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE],
+         //        nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE]); 
+         // printf("node0.source/A1 = %le, node1.source/A2 = %le, node2.source/A3 = %le\n",
+         //        nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * 1/A1,
+         //        nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * 1/A2,
+         //        nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * 1/A3); 
+ 
 
          // Use the discrete divergence theorem to calculate the divergence at this node.
          // The divergence is the sum of the inner product of the vectors associated with the
@@ -954,21 +1139,30 @@ int main(int argc, char** argv) {
          // divided by the area of the Voronoi cell surrounding that node.
 
          // printf("numcorners: %d\n", ionosphereGrid.elements[el].corners.size());
+         // printf("Left-hand side for element %d: \n", el);
          for(uint idx=0; idx<ionosphereGrid.elements[el].corners.size(); idx++) {
             uint32_t gridCornerIndex = ionosphereGrid.elements[el].corners[idx];
+            // printf("  Corner %d: %d\n",
+            //        idx, gridCornerIndex);
 
-            // Calculate the effective area of the Voronoi cell surrounding this node
-            Real dualPolygonArea = 0;
-            for(uint32_t i=0; i<nodes[gridCornerIndex].numTouchingElements; i++) {
-               Real A = ionosphereGrid.elementArea(nodes[gridCornerIndex].touchingElements[i]);
-               dualPolygonArea += A;
-            }
+            // // Calculate the effective area of the Voronoi cell surrounding this node
+            // printf("  Voronoi cell area: ");
+            // printf("  node %d: ", gridCornerIndex);
+            // printf("numTouchingElements = %d, touching elements: ", nodes[gridCornerIndex].numTouchingElements);
             
-            // printf("dualpolygonarea = %le, numtouchingelements = %d\n", dualPolygonArea, nodes[gridCornerIndex].numTouchingElements);
+            Real dualPolygonArea = getDualPolygonArea(ionosphereGrid, gridCornerIndex);
+            // printf("dualPolygonArea = %le\n", dualPolygonArea);
+            
+
+            // printf("Node %d, dualPolygonArea = %le\n",
+            //        gridCornerIndex, dualPolygonArea); 
+            
 
             // printf("numtouching elements: %d,", nodes[gridCornerIndex].numTouchingElements);
+            // printf(" calculating divergence for node %d, touching elements: ", gridCornerIndex);
             for(uint32_t elLocalIndex=0; elLocalIndex<nodes[gridCornerIndex].numTouchingElements; elLocalIndex++) {
                SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[gridCornerIndex].touchingElements[elLocalIndex]];
+               // printf("%d ", nodes[gridCornerIndex].touchingElements[elLocalIndex]);
  
                // Find the two other nodes on this element
                int gridI=0,gridJ=0;
@@ -984,14 +1178,22 @@ int main(int argc, char** argv) {
                   }
                }
 
+               // printf("Other nodes of this element (%d,%d) ", gridI, gridJ);
+
                int32_t otherElementi = ionosphereGrid.findElementNeighbour(nodes[gridCornerIndex].touchingElements[elLocalIndex], localC, localI);
                int32_t otherElementj = ionosphereGrid.findElementNeighbour(nodes[gridCornerIndex].touchingElements[elLocalIndex], localC, localJ);
+
+               // printf("Other elements: %d, %d\n", otherElementi, otherElementj);
+               // printf("Element %d corner %d touching element %d: otherElementi = %d, otherElementj = %d\n",
+               //        el, gridCornerIndex, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi, otherElementj);
 
                if(otherElementi < 0 || otherElementj < 0) {
                   cerr << "Error: Element " << nodes[gridCornerIndex].touchingElements[elLocalIndex] << " does not have neighbour with nodes " << gridI << " and " << gridJ << endl;
                   return 1;
                }
                auto [l1, l2] = getConnectingSegmentLengths(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi);
+               // printf("Connecting lengths between element %d and otherElementi %d: l1 = %le, l2 = %le\n",
+               //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi, l1, l2);
                // printf("Element %i, otherElementi %i, l1 = %le, l2 = %le\n",
                //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi, l1, l2);
 
@@ -999,23 +1201,55 @@ int main(int argc, char** argv) {
                Eigen::Vector3d ri(nodes[gridI].x.data());
 
                Eigen::Vector3d edge = (ri - rm) / (ri - rm).norm();
-               
+                
                Eigen::Vector3d barycentrem = getElementBarycentre(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex]);
                Eigen::Vector3d barycentrei = getElementBarycentre(ionosphereGrid, otherElementi);
                Eigen::Vector3d barycentrej = getElementBarycentre(ionosphereGrid, otherElementj);
 
                // Transform edges to local coordinate system
+
+               //get normal to the elements
+               Eigen::Vector3d normalm = getElementNormal(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex]);
+               Eigen::Vector3d normali = getElementNormal(ionosphereGrid, otherElementi);
+               Eigen::Vector3d normalj = getElementNormal(ionosphereGrid, otherElementj);
                
-               Eigen::Vector3d edgem = Eigen::Quaterniond::FromTwoVectors(barycentrem.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
-               Eigen::Vector3d edgei = Eigen::Quaterniond::FromTwoVectors(barycentrei.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+               
+               Eigen::Vector3d edgem = Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+               Eigen::Vector3d edgei = Eigen::Quaterniond::FromTwoVectors(normali, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+
+               // printf("Edge vectors: edgem = [%le, %le, %le], edgei = [%le, %le, %le]\n",
+               //        edgem(0), edgem(1), edgem(2),
+               //        edgei(0), edgei(1), edgei(2));
+
+               // check if z value of edges exceeds 1e-6
+               if(std::abs(edgem(2)) > 1e-6 || std::abs(edgei(2)) > 1e-6) {
+                  cerr << "Error: Edge vectors are not in the XY plane! edgem = [" << edgem(0) << ", " << edgem(1) << ", " << edgem(2) << "], edgei = [" << edgei(0) << ", " << edgei(1) << ", " << edgei(2) << "]" << endl;
+               }
 
                // Division by 2 due to double counting
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(dualPolygonArea)) * (edgem(0) / (2.));
-               curlSolverMatrix.coeffRef(el, 2 * otherElementi) += (elArea/(dualPolygonArea)) * edgei(0) / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(dualPolygonArea)) * edgem(1) / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * otherElementi + 1) += (elArea/(dualPolygonArea)) * edgei(1) / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(3.*dualPolygonArea)) * (edgem(0) * l1 / (2.));
+               curlSolverMatrix.coeffRef(el, 2 * otherElementi) += (elArea/(3.*dualPolygonArea)) * edgei(0) * l2 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(3.*dualPolygonArea)) * edgem(1) * l1 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * otherElementi + 1) += (elArea/(3.*dualPolygonArea)) * edgei(1) * l2 / (2.);
+
+               // printf("elArea = %le, dualPolygonArea = %le, l1 = %le, l2 = %le, (elArea/(dualPolygonArea)) * edgem(0) * l1 / (2.) = %le, (elArea/(dualPolygonArea)) * edgei(0) * l2 / (2.) = %le\n",
+               //          elArea, dualPolygonArea, l1, l2,
+               //          (elArea/(dualPolygonArea)) * edgem(0) * l1 / (2.),
+               //          (elArea/(dualPolygonArea)) * edgei(0) * l2 / (2.));
+               
+               // printf("(elArea/(dualPolygonArea)) * edgem(1) * l1 / (2.) = %le, (elArea/(dualPolygonArea)) * edgei(1) * l2 / (2.) = %le\n",
+               //          (elArea/(dualPolygonArea)) * edgem(1) * l1 / (2.),
+               //          (elArea/(dualPolygonArea)) * edgei(1) * l2 / (2.));
+
+               // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex], curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]));
+               // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * otherElementi, curlSolverMatrix.coeffRef(el, 2 * otherElementi));
+               // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1, curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1));
+               // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * otherElementi + 1, curlSolverMatrix.coeffRef(el, 2 * otherElementi + 1));
 
                std::tie(l1, l2) = getConnectingSegmentLengths(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementj);
+
+               // printf("Connecting lengths between element %d and otherElementj %d: l1 = %le, l2 = %le\n",
+               //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementj, l1, l2);
                // printf("Element %i, otherElementi %i, l1 = %le, l2 = %le\n",
                //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi, l1, l2);
 
@@ -1023,24 +1257,41 @@ int main(int argc, char** argv) {
 
                edge = (rj - rm) / (rj - rm).norm();
                
-               edgem = Eigen::Quaterniond::FromTwoVectors(barycentrem.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
-               Eigen::Vector3d edgej = Eigen::Quaterniond::FromTwoVectors(barycentrej.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+               edgem = Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+               Eigen::Vector3d edgej = Eigen::Quaterniond::FromTwoVectors(normalj, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+
+               // printf("Edge vectors: edgem = [%le, %le, %le], edgej = [%le, %le, %le]\n",
+               //        edgem(0), edgem(1), edgem(2),
+               //        edgej(0), edgej(1), edgej(2));
 
                // Print out element global number and transformed edge vectors
                // printf("Element %i: edgem = [%le, %le, %le], edgej = [%le, %le, %le], edgei = [%le, %le, %le], edge = [%le, %le, %le]\n",
-               //        el,
-               //        edgem(0), edgem(1), edgem(2),
+               //        el, 
+               //        edgem(0), edgem(1), edgem(2), 
                //        edgej(0), edgej(1), edgej(2),
-               //        edgei(0), edgei(1), edgei(2),
+               //        edgei(0), edgei(1), edgei(2), 
                //        edge(0), edge(1), edge(2));
 
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(dualPolygonArea)) * edgem(0) / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * otherElementj) += (elArea/(dualPolygonArea)) * edgej(0) / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(dualPolygonArea)) * edgem(1) / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * otherElementj + 1) += (elArea/(dualPolygonArea)) * edgej(1) / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(3.*dualPolygonArea)) * edgem(0) * l1 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * otherElementj) += (elArea/(3.*dualPolygonArea)) * edgej(0) * l2 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(3.*dualPolygonArea)) * edgem(1) * l1 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * otherElementj + 1) += (elArea/(3.*dualPolygonArea)) * edgej(1) * l2 / (2.);
+
+               // printf("elArea = %le, dualPolygonArea = %le, l1 = %le, l2 = %le, (elArea/(dualPolygonArea)) * edgem(0) * l1 / (2.) = %le, (elArea/(dualPolygonArea)) * edgej(0) * l2 / (2.) = %le, \n",
+               //          elArea, dualPolygonArea, l1, l2,
+               //          (elArea/(dualPolygonArea)) * edgem(0) * l1 / (2.),
+               //          (elArea/(dualPolygonArea)) * edgej(0) * l2 / (2.));
+               // printf("(elArea/(dualPolygonArea)) * edgem(1) * l1 / (2.) = %le, (elArea/(dualPolygonArea)) * edgej(1) * l2 / (2.) = %le\n",
+               //          (elArea/(dualPolygonArea)) * edgem(1) * l1 / (2.),
+               //          (elArea/(dualPolygonArea)) * edgej(1) * l2 / (2.));
+               
+               // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex], curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]));
+               // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * otherElementj, curlSolverMatrix.coeffRef(el, 2 * otherElementj));
+               // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1, curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1));
+               // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * otherElementj + 1, curlSolverMatrix.coeffRef(el, 2 * otherElementj + 1));
 
                // Print out areas
-                printf("Div Element %d corner %d touching element %d: A =  %le, A1 = %le\n", el, ionosphereGrid.elements[el].corners[idx], ionosphereGrid.nodes[gridCornerIndex].touchingElements[elLocalIndex],elArea, dualPolygonArea);
+                //printf("Div Element %d corner %d touching element %d: A =  %le, A1 = %le\n", el, ionosphereGrid.elements[el].corners[idx], ionosphereGrid.nodes[gridCornerIndex].touchingElements[elLocalIndex],elArea, dualPolygonArea);
                
 
                //printf("Around node %i, element %i has barycentre [%le, %le, %le],\n"
@@ -1083,7 +1334,7 @@ int main(int argc, char** argv) {
       if(!quiet) {
          cout << "Done." << endl;
       }
-      // // Add curlJ constraints for every element until the solver is happy.
+      // Add curlJ constraints for every element until the solver is happy.
       // for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
       //    SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
       //    Real A = ionosphereGrid.elementArea(el);
@@ -1126,10 +1377,10 @@ int main(int argc, char** argv) {
       //       auto [l1, l2] = getConnectingSegmentLengths(ionosphereGrid, el, adjacentElementIndex);
       //       Real ltot = l1 + l2;
 
-      //       curlSolverMatrix.insert(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex) = edgeParallel(0) * l1 / (ltot * A);
+      //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex) += edgeParallel(0) * l1 / (ltot * A);
       //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size()+ el, 2 * el) += adjacentEdgeParallel(0) * l2 / (ltot * A);
 
-      //       curlSolverMatrix.insert(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex + 1) = edgeParallel(1) * l1 / (ltot * A);
+      //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex + 1) += edgeParallel(1) * l1 / (ltot * A);
       //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * el + 1) += adjacentEdgeParallel(1) * l2 / (ltot * A);
       //    }
 
@@ -1152,16 +1403,9 @@ int main(int argc, char** argv) {
       //    }
 
       //    // Distribute FACs by area ratios
-      //    Real A1 = 0, A2 = 0, A3 = 0;
-      //    for(uint e=0; e<ionosphereGrid.nodes[i].numTouchingElements; e++) {
-      //       A1 += ionosphereGrid.elementArea(ionosphereGrid.nodes[i].touchingElements[e]);
-      //    }
-      //    for(uint e=0; e<ionosphereGrid.nodes[j].numTouchingElements; e++) {
-      //       A2 += ionosphereGrid.elementArea(ionosphereGrid.nodes[j].touchingElements[e]);
-      //    }
-      //    for(uint e=0; e<ionosphereGrid.nodes[k].numTouchingElements; e++) {
-      //       A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
-      //    }
+      //    Real A1 = getDualPolygonArea(ionosphereGrid, i);
+      //    Real A2 = getDualPolygonArea(ionosphereGrid, j);
+      //    Real A3 = getDualPolygonArea(ionosphereGrid, k);
 
       //    // NOTE: this is *not* yet the final right-hand side for the
       //    // divergence-free part here yet, as its values depend on the
@@ -1204,7 +1448,7 @@ int main(int argc, char** argv) {
             matrixOut << endl;
          }
          if(!quiet) {
-            cout << "--- CURL SOLVER MATRIX WRITTEN TO JSolverMatrix.txt ---" << endl;
+            cout << "--- CURL SOLVER MATRIX WRITTEN TO JSolverMatrix.txt ---" << endl; 
          }
       }
 
@@ -1546,16 +1790,9 @@ int main(int argc, char** argv) {
 
          int i=element.corners[0],j=element.corners[1],k=element.corners[2];
 
-         Real A1 = 0, A2 = 0, A3 = 0;
-         for(uint e=0; e<ionosphereGrid.nodes[i].numTouchingElements; e++) {
-            A1 += ionosphereGrid.elementArea(ionosphereGrid.nodes[i].touchingElements[e]);
-         }
-         for(uint e=0; e<ionosphereGrid.nodes[j].numTouchingElements; e++) {
-            A2 += ionosphereGrid.elementArea(ionosphereGrid.nodes[j].touchingElements[e]);
-         }
-         for(uint e=0; e<ionosphereGrid.nodes[k].numTouchingElements; e++) {
-            A3 += ionosphereGrid.elementArea(ionosphereGrid.nodes[k].touchingElements[e]);
-         }
+         Real A1 = getDualPolygonArea(ionosphereGrid, i);
+         Real A2 = getDualPolygonArea(ionosphereGrid, j);
+         Real A3 = getDualPolygonArea(ionosphereGrid, k);
 
 
          retval[el] = (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
@@ -1570,14 +1807,15 @@ int main(int argc, char** argv) {
 
          //sum of row corresponding to element in matrix curlSolverMatrix
          for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-            retval[el] = 0;
+            retval[el] = 0; 
+
             for(uint m=0; m<2*ionosphereGrid.elements.size(); m++) {
-               retval[el] += curlSolverMatrix.coeff(el,m)*curlSolverMatrix.coeff(el,m);
+               retval[el] += std::abs(curlSolverMatrix.coeff(el,m));
             }
          }
  
          return retval;
-   })); 
+   }));  
     
       outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_vRHS2", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
          std::vector<Real> retval(grid.elements.size());
@@ -1788,15 +2026,15 @@ int main(int argc, char** argv) {
 
       //      return retval;
       //}));
-      //outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_elementArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_elementArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-      //      std::vector<Real> retval(ionosphereGrid.elements.size());
+           std::vector<Real> retval(ionosphereGrid.elements.size());
 
-      //      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-      //         retval[el] = ionosphereGrid.elementArea(el);
-      //      }
-      //      return retval;
-      //}));
+           for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+              retval[el] = ionosphereGrid.elementArea(el);
+           }
+           return retval;
+      })); 
    // }
 
    for(unsigned int i=0; i<outputDROs.size(); i++) {
