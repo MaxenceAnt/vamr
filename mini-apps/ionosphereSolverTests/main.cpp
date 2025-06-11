@@ -611,7 +611,7 @@ int main(int argc, char** argv) {
    if(numNodes > 0) {
       ionosphereGrid.initializeSphericalFibonacci(numNodes);
    } else {
-      ionosphereGrid.initializeIcosahedron();
+      ionosphereGrid.initializeOctahedron();
    }
    if(gaugeFixString == "pole") {
       ionosphereGrid.gaugeFixing = SphericalTriGrid::Pole;

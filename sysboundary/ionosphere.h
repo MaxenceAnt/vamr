@@ -193,6 +193,7 @@ namespace SBC {
       void updateConnectivity();          /*!< Re-link elements and nodes */
       void updateIonosphereCommunicator(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, FsGrid< fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid); /*!< (Re-)create the subcommunicator for ionosphere-internal communication */
       void initializeTetrahedron();       /*!< Initialize grid as a base tetrahedron */
+      void initializeOctahedron();        /*!< Initialize grid as a base octahedron */
       void initializeIcosahedron();       /*!< Initialize grid as a base icosahedron */
       void initializeSphericalFibonacci(int n); /*!< Initialize grid as a spherical fibonacci lattice */
       int32_t findElementNeighbour(uint32_t e, int n1, int n2);

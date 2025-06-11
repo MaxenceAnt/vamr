@@ -182,7 +182,42 @@ namespace SBC {
          elements.push_back(newElement);
       }
 
-      // Linke elements to nodes
+      // Link elements to nodes
+      updateConnectivity();
+   }
+
+   // Initialize base grid as an Octahedron
+   void SphericalTriGrid::initializeOctahedron() {
+      const static std::array<uint32_t, 3> seedElements[8] = {
+         {0,1,2}, {0,2,3}, {0,3,4}, {0,4,1},
+         {5,2,1}, {5,3,2}, {5,4,3}, {5,1,4},
+      };
+      const static std::array<Real, 3> nodeCoords[6] = {
+         {0,0,1},
+         {1,0,0},
+         {0,1,0},
+         {-1,0,0},
+         {0,-10,0},
+         {0,0,-1}
+      };
+
+      // Create nodes
+      // Additional nodes from table
+      for(const auto& coords : nodeCoords) {
+         Node newNode;
+         newNode.x = coords;
+         normalizeRadius(newNode, Ionosphere::innerRadius);
+         nodes.push_back(newNode);
+      }
+
+      // Create elements
+      for(const auto& seed : seedElements) {
+         Element newElement;
+         newElement.corners = seed;
+         elements.push_back(newElement);
+      }
+
+      // Link elements to nodes
       updateConnectivity();
    }
 
