@@ -14,8 +14,8 @@
 #include <Eigen/Sparse>
 #include <Eigen/Geometry>
 
-#define NODE_CONSTRAINT_REDUCTION -1
-#define ELEMENT_CONSTRAINT_REDUCTION -1
+#define NODE_CONSTRAINT_REDUCTION 1
+#define ELEMENT_CONSTRAINT_REDUCTION 1
 
 using namespace std;
 using namespace SBC;
@@ -975,18 +975,14 @@ int main(int argc, char** argv) {
 
       // Eigen vector and matrix for solving
       Eigen::VectorXd vJ(edgeJCurl.size());
-      Eigen::VectorXd vRHS1(nodes.size() + NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() + ELEMENT_CONSTRAINT_REDUCTION); // Right hand side for divergence-free system
-      Eigen::VectorXd vRHS2(nodes.size() + NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() + ELEMENT_CONSTRAINT_REDUCTION); // Right hand side for curl-free system
-      Eigen::SparseMatrix<Real> curlSolverMatrix(nodes.size() + NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() + ELEMENT_CONSTRAINT_REDUCTION, edgeJCurl.size());
+      Eigen::VectorXd vRHS1(nodes.size() - NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() - ELEMENT_CONSTRAINT_REDUCTION); // Right hand side for divergence-free system
+      Eigen::VectorXd vRHS2(nodes.size() - NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() - ELEMENT_CONSTRAINT_REDUCTION); // Right hand side for curl-free system
+      Eigen::SparseMatrix<Real> curlSolverMatrix(nodes.size() - NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() - ELEMENT_CONSTRAINT_REDUCTION, edgeJCurl.size());
 
       // Divergence constraints
-      for(uint m=0; m<nodes.size() + NODE_CONSTRAINT_REDUCTION; m++) {
+      for(uint m=0; m<nodes.size()-NODE_CONSTRAINT_REDUCTION; m++) {
 
          // Divergence
-
-         // Calculate the effective area of the Voronoi cell surrounding this node
-         Real dualPolygonArea = getDualPolygonArea(ionosphereGrid, m);
-
          vRHS1[m] = 0;
          vRHS2[m] = ionosphereGrid.nodes[m].parameters[ionosphereParameters::SOURCE];
 
@@ -1032,9 +1028,8 @@ int main(int argc, char** argv) {
       }
 
       // Add curlJ constraints for every element until the solver is happy.
-      for(uint el=0; el<ionosphereGrid.elements.size() + ELEMENT_CONSTRAINT_REDUCTION; el++) {
-         SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
-         Real A = ionosphereGrid.elementArea(el);
+      for(uint el=0; el<ionosphereGrid.elements.size() - ELEMENT_CONSTRAINT_REDUCTION; el++) {
+         SphericalTriGrid::Element& element = ionosphereGrid.elements[el+ELEMENT_CONSTRAINT_REDUCTION];
 
          int i=element.corners[0];
          int j=element.corners[1];
@@ -1044,7 +1039,7 @@ int main(int argc, char** argv) {
          Eigen::Vector3d r1(nodes[j].x.data());
          Eigen::Vector3d r2(nodes[k].x.data());
 
-         Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
+         Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el+ELEMENT_CONSTRAINT_REDUCTION);
 
          // Make sure sign is correct (as edges are oriented)
          Real clockwise = r0.dot((r1-r0).cross(r2-r1));
@@ -1057,17 +1052,17 @@ int main(int argc, char** argv) {
          auto [e,orientation] = getEdgeIndexOrientation(i,j);
          Real l1 = (r0 - barycentre).dot((r1-r0).normalized());
          Real l2 = (barycentre - r1).dot((r1-r0).normalized());
-         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + NODE_CONSTRAINT_REDUCTION + el, e) = orientation * (l1+l2);
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * (l1+l2);
 
          std::tie(e,orientation) = getEdgeIndexOrientation(j,k);
          l1 = (r1 - barycentre).dot((r2-r1).normalized());
          l2 = (barycentre - r2).dot((r2-r1).normalized());
-         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + NODE_CONSTRAINT_REDUCTION + el, e) = orientation * (l1+l2);
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * (l1+l2);
 
          std::tie(e,orientation) = getEdgeIndexOrientation(k,i);
          l1 = (r2 - barycentre).dot((r0-r2).normalized());
          l2 = (barycentre - r0).dot((r0-r2).normalized());
-         curlSolverMatrix.insert(ionosphereGrid.nodes.size() + NODE_CONSTRAINT_REDUCTION + el, e) = orientation * (l1+l2);
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * (l1+l2);
 
          // Distribute FACs by area ratios
          Real A1 = getDualPolygonArea(ionosphereGrid, i);
@@ -1078,10 +1073,10 @@ int main(int argc, char** argv) {
          // divergence-free part here yet, as its values depend on the
          // solution of the curl-free part. Correction happens further
          // down.
-         vRHS1[ionosphereGrid.nodes.size() + NODE_CONSTRAINT_REDUCTION + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * 1./A1
+         vRHS1[ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * 1./A1
               + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * 1./A2
               + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * 1./A3);
-         vRHS2[ionosphereGrid.nodes.size() + NODE_CONSTRAINT_REDUCTION + el] = 0;
+         vRHS2[ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el] = 0;
 
       }
 
@@ -1089,7 +1084,7 @@ int main(int argc, char** argv) {
 
       if(writeSolverMtarix) {
          ofstream matrixOut("JSolverMatrix.txt");
-         for(uint n=0; n<nodes.size() + NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() + ELEMENT_CONSTRAINT_REDUCTION; n++) {
+         for(uint n=0; n<nodes.size() - NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() - ELEMENT_CONSTRAINT_REDUCTION; n++) {
             for(uint m=0; m<edgeJCurl.size(); m++) {
 
                Real val=0;
@@ -1110,7 +1105,7 @@ int main(int argc, char** argv) {
 
       // Solve curl-free currents.
       cout << "Solving divJ system" << endl;
-#if NODE_CONSTRAINT_REDUCTION+ELEMENT_CONSTRAINT_REDUCTION != -2
+#if NODE_CONSTRAINT_REDUCTION+ELEMENT_CONSTRAINT_REDUCTION != 2
       Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
 #else
       Eigen::BiCGSTAB<Eigen::SparseMatrix<Real>> solver;
