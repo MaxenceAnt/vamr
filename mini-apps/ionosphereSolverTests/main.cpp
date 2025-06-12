@@ -42,6 +42,8 @@ void recalculateLocalCellsCache(const dccrg::Dccrg<spatial_cell::SpatialCell, dc
 SysBoundary::SysBoundary() {}
 SysBoundary::~SysBoundary() {}
 
+Eigen::MatrixXd inverseSolverMatrix;
+
 // Element Barycentre
 Eigen::Vector3d getElementBarycentre(SphericalTriGrid& grid, uint32_t el) {
    Eigen::Vector3d barycentre(0,0,0);
@@ -1081,6 +1083,8 @@ int main(int argc, char** argv) {
       }
 
       curlSolverMatrix.makeCompressed();
+      Eigen::MatrixXd tempMatrix = curlSolverMatrix;
+      inverseSolverMatrix = tempMatrix.inverse();
 
       if(writeSolverMtarix) {
          ofstream matrixOut("JSolverMatrix.txt");
@@ -1536,6 +1540,28 @@ int main(int argc, char** argv) {
 
             return retval;
       }));
+
+      if(ionosphereGrid.nodes.size() < 200) {
+         for(uint i=0; i<ionosphereGrid.nodes.size(); i++) {
+            outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jDivFromNode" + to_string(i), [&,i](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+                     std::vector<Real> retval(3*grid.elements.size());
+
+                     std::vector<Real> edgeValues(edgeJCurl.size());
+                     for(uint e=0; e<edgeJCurl.size(); e++) {
+                        edgeValues[e] = inverseSolverMatrix.coeffRef(e, i);
+                     }
+
+                     for(uint el=0; el<grid.elements.size(); el++) {
+                        Eigen::Vector3d J = whitneyInterpolate(grid, el, edgeValues);
+                        retval[3*el] = J[0];
+                        retval[3*el+1] = J[1];
+                        retval[3*el+2] = J[2];
+                     }
+
+                     return retval;
+                     }));
+         }
+      }
       //outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_elementArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
       //      std::vector<Real> retval(ionosphereGrid.elements.size());
