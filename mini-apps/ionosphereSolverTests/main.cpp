@@ -1042,6 +1042,7 @@ int main(int argc, char** argv) {
          Eigen::Vector3d r2(nodes[k].x.data());
 
          Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el+ELEMENT_CONSTRAINT_REDUCTION);
+         Real A = ionosphereGrid.elementArea(el);
 
          // Make sure sign is correct (as edges are oriented)
          Real clockwise = r0.dot((r1-r0).cross(r2-r1));
@@ -1052,19 +1053,13 @@ int main(int argc, char** argv) {
          }
 
          auto [e,orientation] = getEdgeIndexOrientation(i,j);
-         Real l1 = (r0 - barycentre).dot((r1-r0).normalized());
-         Real l2 = (barycentre - r1).dot((r1-r0).normalized());
-         curlSolverMatrix.insert(ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * (l1+l2);
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) =  orientation * edgeLength[e];
 
          std::tie(e,orientation) = getEdgeIndexOrientation(j,k);
-         l1 = (r1 - barycentre).dot((r2-r1).normalized());
-         l2 = (barycentre - r2).dot((r2-r1).normalized());
-         curlSolverMatrix.insert(ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * (l1+l2);
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * edgeLength[e];
 
          std::tie(e,orientation) = getEdgeIndexOrientation(k,i);
-         l1 = (r2 - barycentre).dot((r0-r2).normalized());
-         l2 = (barycentre - r0).dot((r0-r2).normalized());
-         curlSolverMatrix.insert(ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * (l1+l2);
+         curlSolverMatrix.insert(ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * edgeLength[e];
 
          // Distribute FACs by area ratios
          Real A1 = getDualPolygonArea(ionosphereGrid, i);
@@ -1075,16 +1070,18 @@ int main(int argc, char** argv) {
          // divergence-free part here yet, as its values depend on the
          // solution of the curl-free part. Correction happens further
          // down.
-         vRHS1[ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * 1./A1
-              + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * 1./A2
-              + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * 1./A3);
+         vRHS1[ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
+              + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
+              + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
          vRHS2[ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el] = 0;
 
       }
 
       curlSolverMatrix.makeCompressed();
-      Eigen::MatrixXd tempMatrix = curlSolverMatrix;
-      inverseSolverMatrix = tempMatrix.inverse();
+      if(ionosphereGrid.nodes.size() < 200) {
+         Eigen::MatrixXd tempMatrix = curlSolverMatrix;
+         inverseSolverMatrix = tempMatrix.inverse();
+      }
 
       if(writeSolverMtarix) {
          ofstream matrixOut("JSolverMatrix.txt");
@@ -1461,6 +1458,7 @@ int main(int argc, char** argv) {
                   J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
                }
                J/=totalA;
+               J*=5;
 
 
                retval[3*n] = J[0];
@@ -1501,6 +1499,7 @@ int main(int argc, char** argv) {
                }
 
                J /= numEdges;
+               J *= 5;
 
                retval[3*n] = J[0];
                retval[3*n+1] = J[1];
@@ -1513,7 +1512,7 @@ int main(int argc, char** argv) {
             std::vector<Real> retval(3*grid.elements.size());
 
             for(uint el=0; el<grid.elements.size(); el++) {
-               Eigen::Vector3d J = elementCurlFreeCurrent[el];
+               Eigen::Vector3d J = elementCurlFreeCurrent[el] * 5;
 
                retval[3*el] = J[0];
                retval[3*el+1] = J[1];
