@@ -1106,7 +1106,7 @@ int main(int argc, char** argv) {
 
       // Solve curl-free currents.
       cout << "Solving divJ system" << endl;
-#if NODE_CONSTRAINT_REDUCTION+ELEMENT_CONSTRAINT_REDUCTION != 2
+#if 1 //NODE_CONSTRAINT_REDUCTION+ELEMENT_CONSTRAINT_REDUCTION != 2
       Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
 #else
       Eigen::BiCGSTAB<Eigen::SparseMatrix<Real>> solver;
@@ -1287,7 +1287,8 @@ int main(int argc, char** argv) {
    }
    gettimeofday(&tStart, NULL);
    potentialSolverMatrix.makeCompressed();
-   Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
+   //Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
+   Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real> > solver;
    solver.compute(potentialSolverMatrix);
    vPhi = solver.solve(vRightHand);
    gettimeofday(&tEnd, NULL);
