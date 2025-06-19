@@ -600,6 +600,82 @@ Eigen::Vector3d whitneyInterpolate(SphericalTriGrid& grid, uint32_t el, std::vec
    return o1*edgeLength[e1]*edgeValue[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeValue[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeValue[e3] *w3(barycentre);
 }
 
+// Interpolate edge-based quantity to nodes, by bisecting the node in coordinate-orthohonal planes and calculating the fluxes through those planes
+Eigen::Vector3d interpolateEdgeToNode(SphericalTriGrid& grid, uint32_t n, std::vector<Real> edgeValue) {
+
+   Eigen::Vector3d Jl(0,0,0), Jr(0,0,0);
+
+   // Sum incoming and outgoing edge vectors coordinate-component wise
+   Eigen::Vector3d summedPathl(0,0,0), summedPathr(0,0,0);
+   for(uint32_t el=0; el< grid.nodes[n].numTouchingElements; el++) {
+      int32_t elementn = grid.nodes[n].touchingElements[el];
+      SphericalTriGrid::Element& element = grid.elements[elementn];
+      // Find the two other nodes on this element
+      int i=0,j=0;
+      int cn=0,ci=0,cj=0;
+      for(int c=0; c< 3; c++) {
+         if(element.corners[c] == n) {
+            cn = c;
+            ci = (c+1)%3;
+            i=element.corners[ci];
+            cj = (c+2)%3;
+            j=element.corners[cj];
+            break;
+         }
+      }
+      Eigen::Vector3d ri(grid.nodes[i].x.data());
+      Eigen::Vector3d rj(grid.nodes[j].x.data());
+      Eigen::Vector3d rn(grid.nodes[n].x.data());
+
+      int32_t otherElementi = grid.findElementNeighbour(elementn, cn, ci);
+      int32_t otherElementj = grid.findElementNeighbour(elementn, cn, cj);
+
+      auto [barycentrei,intersectioni] = getConnectingSegmentLengths(ionosphereGrid, elementn, otherElementi);
+      auto [barycentrej,intersectionj] = getConnectingSegmentLengths(ionosphereGrid, elementn, otherElementj);
+
+      Eigen::Vector3d barycentren = getElementBarycentre(ionosphereGrid, elementn);
+      auto [e,orientation] = getEdgeIndexOrientation(n,i);
+      Eigen::Vector3d vi = (ri-rn).normalized();
+      Eigen::Vector3d segmenti = barycentren-intersectioni;
+      for(int c =0; c<3; c++) {
+         Eigen::Vector3d ec(0,0,0);
+         ec[c]=1;
+
+         // Sum coordinate-negative and coordinate-positive currents separately
+         Real projectedPath = (segmenti - segmenti[c]*ec).norm();
+         if(vi[c] > 0) {
+            Jr[c] += edgeValue[e] * orientation * vi[c] * projectedPath;
+            summedPathr[c] += projectedPath;
+         } else {
+            Jr[c] += edgeValue[e] * orientation * vi[c] * projectedPath;
+            summedPathl[c] += projectedPath;
+         }
+      }
+
+      std::tie(e,orientation) = getEdgeIndexOrientation(n,j);
+      Eigen::Vector3d vj = (rj-rn).normalized();
+      Eigen::Vector3d segmentj = barycentren-intersectionj;
+      for(int c =0; c<3; c++) {
+         Eigen::Vector3d ec(0,0,0);
+         ec[c]=1;
+
+         // Sum coordinate-negative and coordinate-positive currents separately
+         Real projectedPath = (segmentj - segmentj[c]*ec).norm();
+         if(vj[c] > 0) {
+            Jr[c] += edgeValue[e] * orientation * vj[c] * projectedPath;
+            summedPathr[c] += projectedPath;
+         } else {
+            Jr[c] += edgeValue[e] * orientation * vj[c] * projectedPath;
+            summedPathl[c] += projectedPath;
+         }
+      }
+   }
+   Jr = Jr.array() / summedPathr.array();
+   Jl = Jl.array() / summedPathl.array();
+
+   return (Jl+Jr)/2;
+}
+
 int main(int argc, char** argv) {
 
    // Init MPI
@@ -1170,7 +1246,7 @@ int main(int argc, char** argv) {
 
          // Formula 33 from Juusola et al 2025
          // (in A/km)
-         J *= 1000 * 5;
+         J *= 1000;
          Real SigmaH = c4H(MLT) * pow(J.norm(), c5H(MLT));
          Real SigmaP = c4P(MLT) * pow(J.norm(), c5P(MLT));
 
@@ -1449,18 +1525,7 @@ int main(int argc, char** argv) {
             std::vector<Real> retval(3*grid.nodes.size());
 
             for(uint n=0; n<grid.nodes.size(); n++) {
-               Eigen::Vector3d J(0,0,0);
-
-               Real totalA=0;
-               // Sum all incoming edges
-               for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
-                  Real A = grid.elementArea(nodes[n].touchingElements[el]);
-                  totalA += A;
-                  J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
-               }
-               J/=totalA;
-               J*=5;
-
+               Eigen::Vector3d J=interpolateEdgeToNode(grid, n, edgeJCurl);
 
                retval[3*n] = J[0];
                retval[3*n+1] = J[1];
@@ -1473,34 +1538,7 @@ int main(int argc, char** argv) {
 
             std::vector<Real> retval(3*grid.nodes.size());
             for(uint n=0; n<grid.nodes.size(); n++) {
-               Eigen::Vector3d J(0,0,0);
-               int numEdges=0;
-               for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
-                  SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[el]];
-
-                  int i=0, j=0;
-                  for(int c=0; c<3; c++) {
-                     if(element.corners[c] == n) {
-                        i = element.corners[(c+1)%3];
-                        j = element.corners[(c+2)%3];
-                        break;
-                     }
-                  }
-
-                  Eigen::Vector3d rn(nodes[n].x.data());
-                  Eigen::Vector3d ri(nodes[i].x.data());
-                  Eigen::Vector3d rj(nodes[j].x.data());
-
-                  auto [e,orientation] = getEdgeIndexOrientation(i,n);
-                  J += 0.5 * edgeJDiv[e] * orientation * (rn-ri).normalized();
-
-                  std::tie(e,orientation) = getEdgeIndexOrientation(j,n);
-                  J += 0.5 * edgeJDiv[e] * orientation * (rn-rj).normalized();
-                  numEdges++;
-               }
-
-               J /= numEdges;
-               J *= 5;
+               Eigen::Vector3d J=interpolateEdgeToNode(grid, n, edgeJDiv);
 
                retval[3*n] = J[0];
                retval[3*n+1] = J[1];
@@ -1513,7 +1551,7 @@ int main(int argc, char** argv) {
             std::vector<Real> retval(3*grid.elements.size());
 
             for(uint el=0; el<grid.elements.size(); el++) {
-               Eigen::Vector3d J = elementCurlFreeCurrent[el] * 5;
+               Eigen::Vector3d J = elementCurlFreeCurrent[el];
 
                retval[3*el] = J[0];
                retval[3*el+1] = J[1];
