@@ -1208,7 +1208,9 @@ int main(int argc, char** argv) {
          // Note: The coefficients want to be looked up in A/km, so we multiply by 1000
          Real correction = pow(c4H(MLT)/c4P(MLT) * 1000*j_cf.norm(),1./(1.+c5P(MLT)-c5H(MLT))) / (1000*j_cf.norm());
          elementCorrectionFactors[el] = correction;
-         //vRHS1[ionosphereGrid.nodes.size() + el] *= correction;
+         if(el < ionosphereGrid.elements.size()-ELEMENT_CONSTRAINT_REDUCTION-1) {
+            vRHS1[ionosphereGrid.nodes.size() + el] *= correction;
+         }
       }
 
       cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeJCurl.size() << " edges.\n";
@@ -1230,17 +1232,8 @@ int main(int argc, char** argv) {
       // Next, evaluate Sigma as a function of inplane-J and MLT
       #pragma omp parallel for
       for(uint n=0; n < nodes.size(); n++) {
-         Eigen::Vector3d J(0,0,0);
+         Eigen::Vector3d J=interpolateEdgeToNode(ionosphereGrid, n, edgeJCurl);
          Eigen::Vector3d x(nodes[n].x.data());
-
-         Real totalA=0;
-         // Sum all incoming edges
-         for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
-            Real A = ionosphereGrid.elementArea(nodes[n].touchingElements[el]);
-            totalA += A;
-            J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
-         }
-         J/=totalA;
 
          Real MLT = atan2(x[1], x[0]) * 12 / M_PI + 12;
 
