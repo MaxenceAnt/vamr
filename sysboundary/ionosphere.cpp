@@ -989,6 +989,9 @@ namespace SBC {
             }
          } else if(ionizationModel == Juusola2025) {
 
+            const static int NODE_CONSTRAINT_REDUCTION = 1;
+            const static int ELEMENT_CONSTRAINT_REDUCTION =1;
+
             // The juusola model stores currents on the ionosphere mesh edges.
             // But since these variables are only used temporarily here, these
             // are entirely local variables.
@@ -996,7 +999,9 @@ namespace SBC {
             std::vector<Real> edgeJDiv;
             std::vector<Real> edgeLength;
             OpenBucketHashtable<uint64_t, uint> edgeIndex;
-            std::vector< Eigen::Vector3d > elementDivFreeCurrent(ionosphereGrid.elements.size());
+            std::vector< Eigen::Vector3d > elementDivFreeCurrent(elements.size());
+            std::vector< Eigen::Vector3d > elementCurlFreeCurrent(elements.size());
+            std::vector<Real> elementCorrectionFactors(elements.size());
 
             std::function<Real(Real)> c4P = [](Real MLT) {
                const Real values[] = {
@@ -1158,148 +1163,9 @@ namespace SBC {
                return {edgeIndex[hash], orientation};
             };
 
-            // Fill edge arrays
-            for(uint32_t el=0; el< elements.size(); el++) {
-               Element& element = elements[el];
-
-               int i=element.corners[0],j=element.corners[1],k=element.corners[2];
-               Eigen::Vector3d r0(nodes[i].x.data());
-               Eigen::Vector3d r1(nodes[j].x.data());
-               Eigen::Vector3d r2(nodes[k].x.data());
-
-               // Edge length
-               auto [e,orientation] = getEdgeIndexOrientation(i,j);
-               edgeLength[e] = (r0-r1).norm();
-
-               std::tie(e, orientation) = getEdgeIndexOrientation(j,k);
-               edgeLength[e] = (r1-r2).norm();
-
-               std::tie(e, orientation) = getEdgeIndexOrientation(k,i);
-               edgeLength[e] = (r0-r2).norm();
-            }
-
-            // Eigen vector and matrix for solving
-            Eigen::VectorXd vJ(edgeJCurl.size());
-            Eigen::VectorXd vRHS1(nodes.size() + elements.size()); // Right hand side for divergence-free system
-            Eigen::VectorXd vRHS2(nodes.size() + elements.size()); // Right hand side for curl-free system
-            Eigen::SparseMatrix<Real> curlSolverMatrix(nodes.size() + elements.size(), edgeJCurl.size());
-
-            // Divergence constraints
-            for(uint m=0; m<nodes.size(); m++) {
-
-               // Divergence
-               vRHS1[m] = 0;
-               vRHS2[m] = nodes[m].parameters[ionosphereParameters::SOURCE];
-
-               // Calculate the effective area of the Voronoi cell surrounding this node
-               Real dualPolygonArea = 0;
-               for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
-                  Real A = elementArea(el);
-                  dualPolygonArea += A / 3.;
-               }
-
-               for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
-                  Element& element = elements[nodes[m].touchingElements[el]];
-
-                  // Find the two other nodes on this element
-                  int i=0,j=0;
-                  int cm=0,ci=0,cj=0;
-                  for(int c=0; c< 3; c++) {
-                     if(element.corners[c] == m) {
-                        cm = c;
-                        ci = (c+1)%3;
-                        i=element.corners[ci];
-                        cj = (c+2)%3;
-                        j=element.corners[cj];
-                        break;
-                     }
-                  }
-
-                  int32_t otherElementi = findElementNeighbour(nodes[m].touchingElements[el], cm, ci);
-                  int32_t otherElementj = findElementNeighbour(nodes[m].touchingElements[el], cm, cj);
-
-                  Eigen::Vector3d barycentre =  elementBarycentre(nodes[m].touchingElements[el]);
-                  Eigen::Vector3d barycentrei = elementBarycentre(otherElementi);
-                  Eigen::Vector3d barycentrej = elementBarycentre(otherElementj);
-
-                  // Find the voronoi polygon edge lengths
-                  Real dualEdgeLengthi = (barycentrei - barycentre).norm();
-                  Real dualEdgeLengthj = (barycentrej - barycentre).norm();
-
-                  auto [e,orientation] = getEdgeIndexOrientation(m,i);
-                  curlSolverMatrix.coeffRef(m, e) = orientation * dualEdgeLengthi / dualPolygonArea;
-                  std::tie(e,orientation) = getEdgeIndexOrientation(m,j);
-                  curlSolverMatrix.coeffRef(m, e) = orientation * dualEdgeLengthj / dualPolygonArea;
-               }
-            }
-
-            // curlJ constraints
-            for(uint el=0; el < elements.size(); el++) {
-               Element& element = elements[el];
-               Real A = elementArea(el);
-
-               int i=element.corners[0];
-               int j=element.corners[1];
-               int k=element.corners[2];
-
-               Eigen::Vector3d r0(nodes[i].x.data());
-               Eigen::Vector3d r1(nodes[j].x.data());
-               Eigen::Vector3d r2(nodes[k].x.data());
-
-               // Make sure sign is correct (as edges are oriented)
-               Real clockwise = r0.dot((r1-r0).cross(r2-r1));
-               if(clockwise > 0) {
-                  clockwise = -1;
-               } else {
-                  clockwise = 1;
-               }
-
-               auto [e,orientation] = getEdgeIndexOrientation(i,j);
-               curlSolverMatrix.insert(nodes.size() + el, e) = orientation * edgeLength[e] / A;
-
-               std::tie(e,orientation) = getEdgeIndexOrientation(j,k);
-               curlSolverMatrix.insert(nodes.size() + el, e) = orientation * edgeLength[e] / A;
-
-               std::tie(e,orientation) = getEdgeIndexOrientation(k,i);
-               curlSolverMatrix.insert(nodes.size() + el, e) = orientation * edgeLength[e] / A;
-
-               // Distribute FACs by area ratios
-               Real A1 = 0, A2 = 0, A3 = 0;
-               for(uint e=0; e<nodes[i].numTouchingElements; e++) {
-                  A1 += elementArea(nodes[i].touchingElements[e]);
-               }
-               for(uint e=0; e<nodes[j].numTouchingElements; e++) {
-                  A2 += elementArea(nodes[j].touchingElements[e]);
-               }
-               for(uint e=0; e<nodes[k].numTouchingElements; e++) {
-                  A3 += elementArea(nodes[k].touchingElements[e]);
-               }
-
-               // NOTE: this is *not* yet the final right-hand side for the
-               // divergence-free part here yet, as its values depend on the
-               // solution of the curl-free part. Correction happens further
-               // down.
-               vRHS1[nodes.size() + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
-                     + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
-                     + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
-               vRHS2[nodes.size() + el] = 0;
-
-            }
-
-            curlSolverMatrix.makeCompressed();
-
-            // Solve curl-free currents.
-            Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
-            solver.compute(curlSolverMatrix);
-            vJ = solver.solve(vRHS2);
-
-            for(uint e=0; e<edgeJDiv.size(); e++) {
-               edgeJDiv[e] = vJ[e];
-            }
-
-            // Interpolate edge-localized J_CF to elements
-            for(uint el=0; el<elements.size(); el++) {
-               // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
+            // Interpolate edge-based quantity to elements (barycentres) using Whitney 1-forms.
+            // (DOI: 10.1145/1141911.1141991)
+            auto whitneyInterpolate = [this,&getEdgeIndexOrientation,&edgeLength](uint32_t el, std::vector<Real> edgeValue) -> Eigen::Vector3d {
                std::array<uint32_t, 3>& corners = elements[el].corners;
                Real A = elementArea(el);
 
@@ -1340,17 +1206,237 @@ namespace SBC {
                   return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
                };
 
-               // Effective curl-free current in this element
-               Eigen::Vector3d j_cf = (o1*edgeLength[e1]*edgeJDiv[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeJDiv[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeJDiv[e3] *w3(barycentre)) / sqrt(A);
+               // Effective interpolated value this element
+               return o1*edgeLength[e1]*edgeValue[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeValue[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeValue[e3] *w3(barycentre);
 
-               elementDivFreeCurrent[el] = j_cf;
+            };
 
+            // Interpolate edge-based quantity to nodes, by bisecting the node in coordinate-orthohonal planes and calculating the
+            // fluxes through those planes
+            auto interpolateEdgeToNode = [this,&getEdgeIndexOrientation,&edgeLength](uint32_t n, std::vector<Real> edgeValue) -> Eigen::Vector3d {
+
+               Eigen::Vector3d Jl(0,0,0), Jr(0,0,0);
+
+               // Sum incoming and outgoing edge vectors coordinate-component wise
+               Eigen::Vector3d summedPathl(0,0,0), summedPathr(0,0,0);
+               for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
+                  int32_t elementn = nodes[n].touchingElements[el];
+                  SphericalTriGrid::Element& element = elements[elementn];
+                  // Find the two other nodes on this element
+                  int i=0,j=0;
+                  int cn=0,ci=0,cj=0;
+                  for(int c=0; c< 3; c++) {
+                     if(element.corners[c] == n) {
+                        cn = c;
+                        ci = (c+1)%3;
+                        i=element.corners[ci];
+                        cj = (c+2)%3;
+                        j=element.corners[cj];
+                        break;
+                     }
+                  }
+                  Eigen::Vector3d ri(nodes[i].x.data());
+                  Eigen::Vector3d rj(nodes[j].x.data());
+                  Eigen::Vector3d rn(nodes[n].x.data());
+
+                  int32_t otherElementi = findElementNeighbour(elementn, cn, ci);
+                  int32_t otherElementj = findElementNeighbour(elementn, cn, cj);
+
+                  auto [barycentrei,intersectioni] = connectingSegmentLengths(elementn, otherElementi);
+                  auto [barycentrej,intersectionj] = connectingSegmentLengths(elementn, otherElementj);
+
+                  Eigen::Vector3d barycentren = elementBarycentre(elementn);
+                  auto [e,orientation] = getEdgeIndexOrientation(n,i);
+                  Eigen::Vector3d vi = (ri-rn).normalized();
+                  Eigen::Vector3d segmenti = barycentren-intersectioni;
+                  for(int c =0; c<3; c++) {
+                     Eigen::Vector3d ec(0,0,0);
+                     ec[c]=1;
+
+                     // Sum coordinate-negative and coordinate-positive currents separately
+                     Real projectedPath = (segmenti - segmenti[c]*ec).norm();
+                     if(vi[c] > 0) {
+                        Jr[c] += edgeValue[e] * orientation * vi[c] * projectedPath;
+                        summedPathr[c] += projectedPath;
+                     } else {
+                        Jr[c] += edgeValue[e] * orientation * vi[c] * projectedPath;
+                        summedPathl[c] += projectedPath;
+                     }
+                  }
+
+                  std::tie(e,orientation) = getEdgeIndexOrientation(n,j);
+                  Eigen::Vector3d vj = (rj-rn).normalized();
+                  Eigen::Vector3d segmentj = barycentren-intersectionj;
+                  for(int c =0; c<3; c++) {
+                     Eigen::Vector3d ec(0,0,0);
+                     ec[c]=1;
+
+                     // Sum coordinate-negative and coordinate-positive currents separately
+                     Real projectedPath = (segmentj - segmentj[c]*ec).norm();
+                     if(vj[c] > 0) {
+                        Jr[c] += edgeValue[e] * orientation * vj[c] * projectedPath;
+                        summedPathr[c] += projectedPath;
+                     } else {
+                        Jr[c] += edgeValue[e] * orientation * vj[c] * projectedPath;
+                        summedPathl[c] += projectedPath;
+                     }
+                  }
+               }
+               Jr = Jr.array() / summedPathr.array();
+               Jl = Jl.array() / summedPathl.array();
+
+               return (Jl+Jr)/2;
+            };
+
+            // Fill edge arrays
+            for(uint32_t el=0; el< elements.size(); el++) {
+               Element& element = elements[el];
+
+               int i=element.corners[0],j=element.corners[1],k=element.corners[2];
+               Eigen::Vector3d r0(nodes[i].x.data());
+               Eigen::Vector3d r1(nodes[j].x.data());
+               Eigen::Vector3d r2(nodes[k].x.data());
+
+               // Edge length
+               auto [e,orientation] = getEdgeIndexOrientation(i,j);
+               edgeLength[e] = (r0-r1).norm();
+
+               std::tie(e, orientation) = getEdgeIndexOrientation(j,k);
+               edgeLength[e] = (r1-r2).norm();
+
+               std::tie(e, orientation) = getEdgeIndexOrientation(k,i);
+               edgeLength[e] = (r0-r2).norm();
+            }
+
+            // Eigen vector and matrix for solving
+            Eigen::VectorXd vJ(edgeJCurl.size());
+            Eigen::VectorXd vRHS1(nodes.size() - NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() - ELEMENT_CONSTRAINT_REDUCTION); // Right hand side for divergence-free system
+            Eigen::VectorXd vRHS2(nodes.size() - NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() - ELEMENT_CONSTRAINT_REDUCTION); // Right hand side for curl-free system
+            Eigen::SparseMatrix<Real> curlSolverMatrix(nodes.size() - NODE_CONSTRAINT_REDUCTION + ionosphereGrid.elements.size() - ELEMENT_CONSTRAINT_REDUCTION, edgeJCurl.size());
+
+            // Divergence constraints
+            for(uint m=0; m<nodes.size()-NODE_CONSTRAINT_REDUCTION; m++) {
+
+               // Divergence
+               vRHS1[m] = 0;
+               vRHS2[m] = nodes[m].parameters[ionosphereParameters::SOURCE];
+
+               for(uint32_t el=0; el< nodes[m].numTouchingElements; el++) {
+                  int32_t elementm = nodes[m].touchingElements[el];
+                  Element& element = elements[elementm];
+
+                  // Find the two other nodes on this element
+                  int i=0,j=0;
+                  int cm=0,ci=0,cj=0;
+                  for(int c=0; c< 3; c++) {
+                     if(element.corners[c] == m) {
+                        cm = c;
+                        ci = (c+1)%3;
+                        i=element.corners[ci];
+                        cj = (c+2)%3;
+                        j=element.corners[cj];
+                        break;
+                     }
+                  }
+
+                  int32_t otherElementi = findElementNeighbour(nodes[m].touchingElements[el], cm, ci);
+                  int32_t otherElementj = findElementNeighbour(nodes[m].touchingElements[el], cm, cj);
+
+                  Eigen::Vector3d ri(nodes[i].x.data());
+                  Eigen::Vector3d rj(nodes[j].x.data());
+                  Eigen::Vector3d rm(nodes[m].x.data());
+
+                  auto [barycentrei,intersectioni] = connectingSegmentLengths(elementm, otherElementi);
+                  auto [barycentrej,intersectionj] = connectingSegmentLengths(elementm, otherElementj);
+
+                  Eigen::Vector3d barycentrem = elementBarycentre(elementm);
+
+                  Real gaussIntegralContributioni = ((intersectioni - barycentrem).cross( (ri-rm).normalized())).norm()
+                     + ((intersectioni - barycentrei).cross( (ri-rm).normalized())).norm();
+                  Real gaussIntegralContributionj = ((intersectionj - barycentrem).cross( (rj-rm).normalized())).norm()
+                     + ((intersectionj - barycentrej).cross( (rj-rm).normalized())).norm();
+
+                  auto [e,orientation] = getEdgeIndexOrientation(m,i);
+                  curlSolverMatrix.coeffRef(m, e) = orientation * gaussIntegralContributioni;
+                  std::tie(e,orientation) = getEdgeIndexOrientation(m,j);
+                  curlSolverMatrix.coeffRef(m, e) = orientation * gaussIntegralContributionj;
+               }
+            }
+
+            // curlJ constraints
+            for(uint el=0; el<ionosphereGrid.elements.size() - ELEMENT_CONSTRAINT_REDUCTION; el++) {
+               Element& element = ionosphereGrid.elements[el+ELEMENT_CONSTRAINT_REDUCTION];
+               Real A = elementArea(el);
+               Eigen::Vector3d barycentre = elementBarycentre(el+ELEMENT_CONSTRAINT_REDUCTION);
+
+               int i=element.corners[0];
+               int j=element.corners[1];
+               int k=element.corners[2];
+
+               Eigen::Vector3d r0(nodes[i].x.data());
+               Eigen::Vector3d r1(nodes[j].x.data());
+               Eigen::Vector3d r2(nodes[k].x.data());
+
+               // Make sure sign is correct (as edges are oriented)
+               Real clockwise = r0.dot((r1-r0).cross(r2-r1));
+               if(clockwise > 0) {
+                  clockwise = -1;
+               } else {
+                  clockwise = 1;
+               }
+
+               auto [e,orientation] = getEdgeIndexOrientation(i,j);
+               curlSolverMatrix.insert(nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) =  orientation * edgeLength[e];
+
+               std::tie(e,orientation) = getEdgeIndexOrientation(j,k);
+               curlSolverMatrix.insert(nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * edgeLength[e];
+
+               std::tie(e,orientation) = getEdgeIndexOrientation(k,i);
+               curlSolverMatrix.insert(nodes.size() - NODE_CONSTRAINT_REDUCTION + el, e) = orientation * edgeLength[e];
+
+               // Distribute FACs by area ratios
+               Real A1 = dualPolygonArea(i);
+               Real A2 = dualPolygonArea(j);
+               Real A3 = dualPolygonArea(k);
+
+               // NOTE: this is *not* yet the final right-hand side for the
+               // divergence-free part here yet, as its values depend on the
+               // solution of the curl-free part. Correction happens further
+               // down.
+               vRHS1[ionosphereGrid.nodes.size() - NODE_CONSTRAINT_REDUCTION + el] = clockwise * (nodes[element.corners[0]].parameters[ionosphereParameters::SOURCE] * A/A1
+                     + nodes[element.corners[1]].parameters[ionosphereParameters::SOURCE] * A/A2
+                     + nodes[element.corners[2]].parameters[ionosphereParameters::SOURCE] * A/A3);
+               vRHS2[nodes.size() + el] = 0;
+
+            }
+
+            curlSolverMatrix.makeCompressed();
+
+            // Solve curl-free currents.
+            Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
+            solver.compute(curlSolverMatrix);
+            vJ = solver.solve(vRHS2);
+
+            for(uint e=0; e<edgeJDiv.size(); e++) {
+               edgeJDiv[e] = vJ[e];
+            }
+
+            // Interpolate edge-localized J_CF to elements
+            for(uint el=0; el<elements.size(); el++) {
+               // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
+               Eigen::Vector3d j_cf = whitneyInterpolate(el, edgeJDiv);
+
+               elementCurlFreeCurrent[el] = j_cf;
+
+               Eigen::Vector3d barycentre = elementBarycentre(el);
                Real MLT = atan2(barycentre[1], barycentre[0]) * 12 / M_PI + 12;
 
                // Note: The coefficients want to be looked up in A/km, so we multiply by 1000
                Real correction = pow(c4H(MLT)/c4P(MLT) * 1000*j_cf.norm(),1./(1.+c5P(MLT)-c5H(MLT))) / (1000*j_cf.norm());
-               //elementCorrectionFactors[el] = correction;
-               vRHS1[nodes.size() + el] *= correction;
+               elementCorrectionFactors[el] = correction;
+               if(el < elements.size()-ELEMENT_CONSTRAINT_REDUCTION-1) {
+                  vRHS1[nodes.size() + el] *= correction;
+               }
             }
 
             // Solve divergence-free system
@@ -1360,20 +1446,19 @@ namespace SBC {
                edgeJCurl[e] = vJ[e];
             }
 
+            // Now, likewise interpolate edge-localized J_DF to elements
+            for(uint el=0; el<elements.size(); el++) {
+               // Effective curl-free current in this element
+               Eigen::Vector3d j_df = whitneyInterpolate(el, edgeJCurl);
+
+               elementDivFreeCurrent[el] = j_df;
+            }
+
             // Next, evaluate Sigma as a function of inplane-J and MLT
 #pragma omp parallel for
             for(uint n=0; n < nodes.size(); n++) {
-               Eigen::Vector3d J(0,0,0);
+               Eigen::Vector3d J=interpolateEdgeToNode(n, edgeJCurl);
                Eigen::Vector3d x(nodes[n].x.data());
-
-               Real totalA=0;
-               // Sum all incoming edges
-               for(uint32_t el=0; el< nodes[n].numTouchingElements; el++) {
-                  Real A = elementArea(nodes[n].touchingElements[el]);
-                  totalA += A;
-                  J += elementDivFreeCurrent[nodes[n].touchingElements[el]] * A;
-               }
-               J/=totalA;
 
                Real MLT = atan2(x[1], x[0]) * 12 / M_PI + 12;
 

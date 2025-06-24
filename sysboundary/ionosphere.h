@@ -294,6 +294,7 @@ namespace SBC {
          }
          return area;
       }
+
       Eigen::Vector3d elementBarycentre(uint32_t el) {
          Eigen::Vector3d barycentre(0,0,0);
 
@@ -308,6 +309,32 @@ namespace SBC {
          return barycentre;
       }
 
+      Eigen::Vector3d elementNormal(uint32_t el) {
+         Eigen::Vector3d normal(0,0,0);
+
+         SphericalTriGrid::Element& element = elements[el];
+         uint32_t corner1 = element.corners[0];
+         uint32_t corner2 = element.corners[1];
+         uint32_t corner3 = element.corners[2];
+
+         Eigen::Vector3d a(nodes[corner1].x.data());
+         Eigen::Vector3d b(nodes[corner2].x.data());
+         Eigen::Vector3d c(nodes[corner3].x.data());
+
+         Eigen::Vector3d edge1 = b - a;
+         Eigen::Vector3d edge2 = c - a;
+
+         normal = edge1.cross(edge2);
+
+         normal.normalize();
+
+         if(normal.dot(elementBarycentre(el)) < 0) {
+            normal *= -1.;
+         }
+
+         return normal;
+      }
+
       Real nodeNeighbourArea(uint32_t nodeIndex) { // Summed area of all touching elements
 
          Node& n = nodes[nodeIndex];
@@ -317,6 +344,105 @@ namespace SBC {
             area += elementArea(n.touchingElements[i]);
          }
          return area;
+      }
+
+      // Area of the dual polygon around the given node
+      // (Note: This is *not* equal to nodeNeighborArea / 3)
+      Real dualPolygonArea(uint gridNode){
+         Real A = 0.;
+         for(uint i = 0; i < nodes[gridNode].numTouchingElements; i++){
+            uint32_t gridEl = nodes[gridNode].touchingElements[i];
+            Eigen::Vector3d nodePosition(nodes[gridNode].x.data());
+            SphericalTriGrid::Element& element = elements[gridEl];
+
+            int localC=0,localI=0,localJ=0;
+            for(int c=0; c < 3; c++) {
+               if(element.corners[c] == gridNode) {
+                  localC = c;
+                  localI = (c+1)%3;
+                  localJ = (c+2)%3;
+                  break;
+               }
+            }
+
+            uint otherElementi = findElementNeighbour(gridEl, localC, localI);
+            uint otherElementj = findElementNeighbour(gridEl, localC, localJ);
+
+            Eigen::Vector3d centerm = elementBarycentre(gridEl);
+            Eigen::Vector3d centeri = elementBarycentre(otherElementi);
+            Eigen::Vector3d centerj = elementBarycentre(otherElementj);
+
+            Eigen::Vector3d normalm = elementNormal(gridEl);
+            Eigen::Vector3d normali = elementNormal(otherElementi);
+            Eigen::Vector3d normalj = elementNormal(otherElementj);
+
+            Eigen::Vector3d rotatedCenteri = nodePosition + Eigen::Quaternion<Real>::FromTwoVectors(normali, normalm).toRotationMatrix() * (centeri - nodePosition);
+            Eigen::Vector3d rotatedCenterj = nodePosition + Eigen::Quaternion<Real>::FromTwoVectors(normalj, normalm).toRotationMatrix() * (centerj - nodePosition);
+
+            Eigen::Vector3d edgeNodeM = nodePosition - centerm;
+            Eigen::Vector3d edgeNodeI = nodePosition - rotatedCenteri;
+            Eigen::Vector3d edgeNodeJ = nodePosition - rotatedCenterj;
+
+            Real areaMI = edgeNodeM.cross(edgeNodeI).norm() / 2.;
+            Real areaMJ = edgeNodeM.cross(edgeNodeJ).norm() / 2.;
+
+            // Double counting
+            A += (areaMI + areaMJ) / 2.;
+
+         }
+         return A;
+      }
+
+      // Calculate neighbor's Barycentre and dual polygon - edge - intersection point.
+      std::tuple<Eigen::Vector3d, Eigen::Vector3d> connectingSegmentLengths(uint32_t el1, uint32_t el2) {
+         SphericalTriGrid::Element& element1 = elements[el1];
+         SphericalTriGrid::Element& element2 = elements[el2];
+
+         Eigen::Vector3d barycentre1 = elementBarycentre(el1);
+         Eigen::Vector3d barycentre2 = elementBarycentre(el2);
+
+         // Get common edge to these two elements
+         for(uint i=0; i<3; i++) {
+            if(element1.corners[i] == element2.corners[0] ||
+                  element1.corners[i] == element2.corners[1] ||
+                  element1.corners[i] == element2.corners[2]) {
+               for(uint j=0; j<3; j++) {
+                  if(i != j && (element1.corners[j] == element2.corners[0] ||
+                           element1.corners[j] == element2.corners[1] ||
+                           element1.corners[j] == element2.corners[2])) {
+
+                     uint corner1 = element1.corners[i];
+                     uint corner2 = element1.corners[j];
+
+                     Eigen::Vector3d normal1 = elementNormal(el1);
+                     Eigen::Vector3d normal2 = elementNormal(el2);
+
+                     Eigen::Vector3d rotatedBarycentre2 =  Eigen::Vector3d(nodes[corner1].x.data()) +
+                        Eigen::Quaternion<Real>::FromTwoVectors(normal2, normal1).toRotationMatrix() *
+                        (barycentre2 - Eigen::Vector3d(nodes[corner1].x.data()));
+
+                     Eigen::Vector3d corner1Position(nodes[corner1].x.data());
+                     Eigen::Vector3d corner2Position(nodes[corner2].x.data());
+
+                     Eigen::Vector3d barycentre1ToBarycentre2 = (rotatedBarycentre2 - barycentre1).normalized();
+                     Eigen::Vector3d corner1ToCorner2 = (corner2Position - corner1Position).normalized();
+
+                     // Get intersection of line between barycenters and line between corners
+                     Eigen::Matrix<double, 3, 2> A;
+                     A.col(0) = barycentre1ToBarycentre2;
+                     A.col(1) = - corner1ToCorner2;
+                     Eigen::Vector3d b = corner1Position - barycentre1;
+                     Eigen::Vector2d t = A.colPivHouseholderQr().solve(b);
+                     Eigen::Vector3d intersection = barycentre1 + t(0) * barycentre1ToBarycentre2;
+
+                     return std::make_tuple(barycentre2, intersection);
+                  }
+               }
+            }
+         }
+
+         // Not found, something went bananas.
+         abort();
       }
 
       std::array<Real,3> computeGradT(const std::array<Real, 3>& a, const std::array<Real, 3>& b, const std::array<Real, 3>& c);
