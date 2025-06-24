@@ -57,7 +57,6 @@ namespace SBC {
       Real rho;
       Real V0[3];
       Real T;
-      Real fluffiness;
    };
 
    enum IonosphereBoundaryVDFmode { // How are inner boundary VDFs constructed from the ionosphere

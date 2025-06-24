@@ -48,6 +48,7 @@
 #include "spatial_cells/spatial_cell_wrapper.hpp"
 #include "datareduction/datareducer.h"
 #include "sysboundary/sysboundary.h"
+#include "vlasovsolver/cpu_pitch_angle_diffusion.h"
 #include "fieldtracing/fieldtracing.h"
 
 #include "fieldsolver/fs_common.h"
@@ -62,9 +63,10 @@
 #include "fieldsolver/gridGlue.hpp"
 #include "fieldsolver/derivatives.hpp"
 
+#include <signal.h>
+
 #ifdef CATCH_FPE
 #include <fenv.h>
-#include <signal.h>
 /*! Function used to abort the program upon detecting a floating point exception. Which exceptions are caught is defined using the function feenableexcept.
  */
 void fpehandler(int sig_num)
@@ -87,6 +89,17 @@ bool globalflags::writeRecover = false;
 bool globalflags::balanceLoad = false;
 bool globalflags::doRefine = false;
 bool globalflags::ionosphereJustSolved = false;
+
+#ifdef CATCH_SIGTERM
+// The normal behaviour on SIGTERM is to simply abort the simulation in place.
+// This implementation instead attempts to write a restart file and then quit,
+// to work nicely with slurm's job preemption mechanism.
+void termhandler(int sig_num) {
+   logFile << "Caught SIGTERM. Writing recover and initiating bailout." << endl << flush;
+   globalflags::bailingOut = 1;
+   globalflags::writeRecover = 1;
+}
+#endif
 
 ObjectWrapper objectWrapper;
 
@@ -188,9 +201,20 @@ void computeNewTimeStep(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpi
               << writeVerbose;
 
       if (P::dynamicTimestep) {
+         // Check if the calculated value was and continues to be above the ceiling
+         if (P::dt_ceil > 0.0 && newDt >= P::dt_ceil && P::dt == P::dt_ceil) {
+            isChanged = false;
+            newDt = P::dt_ceil;
+            return;
+         }
+         // Check if we at this time exceeded the ceiling
+         if (P::dt_ceil > 0.0 && newDt > P::dt_ceil) {
+            newDt = P::dt_ceil;
+            logFile << "(TIMESTEP) However, ceiling timestep in config overrides larger dynamic and dt = " << P::dt_ceil << endl << writeVerbose;
+         } 
          subcycleDt = newDt;
       } else {
-         logFile << "(TIMESTEP) However, fixed timestep in config overrides dt = " << P::dt << endl << writeVerbose;
+         logFile << "(TIMESTEP) However, fixed timestep in config overrides and dt = " << P::dt << endl << writeVerbose;
          subcycleDt = P::dt;
       }
    } else {
@@ -226,6 +250,10 @@ int simulate(int argn,char* args[]) {
    feenableexcept(FE_DIVBYZERO|FE_INVALID|FE_OVERFLOW);
    //feenableexcept(FE_DIVBYZERO|FE_INVALID);
    signal(SIGFPE, fpehandler);
+   #endif
+
+   #ifdef CATCH_SIGTERM
+   signal(SIGTERM, termhandler);
    #endif
 
    // Initialize memory allocator configuration.
@@ -636,13 +664,15 @@ int simulate(int argn,char* args[]) {
       SBC::ionosphereGrid.calculateConductivityTensor(SBC::Ionosphere::F10_7, SBC::Ionosphere::recombAlpha, SBC::Ionosphere::backgroundIonisation, true);
    }
 
-   if (P::isRestart == false) {
-      phiprof::Timer timer {"compute-dt"};
-      // Run Vlasov solver once with zero dt to initialize
-      // per-cell dt limits. In restarts, we read the dt from file.
-      calculateSpatialTranslation(mpiGrid,0.0);
-      calculateAcceleration(mpiGrid,0.0);      
-   }
+   phiprof::Timer dttimer {"compute-dt"};
+   // Run Vlasov solver once with zero dt to initialize
+   // per-cell dt limits. Also compute initial _R and _V moments at restart.
+   calculateSpatialTranslation(mpiGrid,0.0);
+   calculateAcceleration(mpiGrid,0.0);
+
+   sysBoundaryContainer.setupL2OutflowAtRestart(mpiGrid);
+
+   dttimer.stop();
 
    // Save restart data
    if (P::writeInitialState) {
@@ -1303,6 +1333,15 @@ int simulate(int argn,char* args[]) {
       }
       vspaceTimer.stop(computedCells, "Cells");
       addTimedBarrier("barrier-after-acceleration");
+
+      if (P::artificialPADiff){
+         // TODO: GPU version
+         phiprof::Timer diffusionTimer {"Pitch-angle diffusion"};
+         for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
+	      pitchAngleDiffusion(mpiGrid,popID);
+         }
+         diffusionTimer.stop(computedCells, "Cells");
+      }
 
       if (P::propagateVlasovTranslation || P::propagateVlasovAcceleration ) {
          phiprof::Timer timer {"Update system boundaries (Vlasov post-acceleration)"};

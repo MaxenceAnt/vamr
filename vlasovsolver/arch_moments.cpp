@@ -34,7 +34,7 @@ using namespace std;
 
 /** Calculate zeroth, first, and (possibly) second bulk velocity moments for the
  * given spatial cell. The calculated moments include contributions from
- * all existing particle populations. This function is AMR safe.
+ * all existing particle populations.
  * @param cell Spatial cell.
  * @param computeSecond If true, second velocity moments are calculated.
  * @param doNotSkip If false, DO_NOT_COMPUTE cells are skipped.*/
@@ -79,7 +79,7 @@ void calculateCellMoments(spatial_cell::SpatialCell* cell,
          for (int i=0; i<3; ++i) {
             pop.V[i]=0;
          }
-         for (int i=0; i<6; ++i) {
+         for (int i=0; i<nMom2; ++i) {
             pop.P[i]=0;
          }
          continue;
@@ -92,11 +92,9 @@ void calculateCellMoments(spatial_cell::SpatialCell* cell,
       Real array[nMom1] = {0};
 
       // Calculate species' contribution to first velocity moments
-      phiprof::Timer firstMomentsTimer {"calcFirstMoments"};
       blockVelocityFirstMoments(blockContainer,
                                 array,
                                 nBlocks);
-      firstMomentsTimer.stop();
       pop.RHO = array[0];
       pop.V[0] = divideIfNonZero(array[1], array[0]);
       pop.V[1] = divideIfNonZero(array[2], array[0]);
@@ -143,14 +141,12 @@ void calculateCellMoments(spatial_cell::SpatialCell* cell,
       Real array[nMom2] = {0};
 
       // Calculate species' contribution to second velocity moments
-      phiprof::Timer secondMomentsTimer {"calcSecondMoments"};
       blockVelocitySecondMoments(blockContainer,
                                  cell->parameters[CellParams::VX],
                                  cell->parameters[CellParams::VY],
                                  cell->parameters[CellParams::VZ],
                                  array,
                                  nBlocks);
-      secondMomentsTimer.stop();
       // Store species' contribution to bulk velocity moments
       Population &pop = cell->get_population(popID);
       for (size_t i=0; i<nMom2; ++i) {
@@ -172,19 +168,23 @@ void calculateCellMoments(spatial_cell::SpatialCell* cell,
 /** Calculate zeroth, first, and (possibly) second bulk velocity moments for the
  * given spatial cell. The calculated moments include
  * contributions from all existing particle populations. The calculated moments
- * are stored to SpatialCell::parameters in _R variables. This function is AMR safe.
+ * are stored to SpatialCell::parameters in _R variables.
  * @param mpiGrid Parallel grid library.
  * @param cells Vector containing the spatial cells to be calculated.
- * @param computeSecond If true, second velocity moments are calculated.*/
+ * @param computeSecond If true, second velocity moments are calculated.
+ * @param initialCompute If true, force re-calculation of outflow L1 sysboundary cell moments.
+  (otherwise skipped as their VDF contents are not kept up to date)
+*/
 void calculateMoments_R(
    dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
    const std::vector<CellID>& cells,
-   const bool& computeSecond) {
+   const bool& computeSecond,
+   const bool initialCompute) {
 
    // override with optimized GPU version to launch
    // single kernel accessing all cells at once (10x faster)
    #ifdef USE_GPU
-   gpu_calculateMoments_R(mpiGrid,cells,computeSecond);
+   gpu_calculateMoments_R(mpiGrid,cells,computeSecond,initialCompute);
    return;
    #endif
 
@@ -192,13 +192,14 @@ void calculateMoments_R(
    for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
 #pragma omp parallel for schedule(dynamic,1)
       for (size_t c=0; c<cells.size(); ++c) {
-         phiprof::Timer computeMomentsCellTimer {"compute-moments-R-cell-first"};
          SpatialCell* cell = mpiGrid[cells[c]];
 
          if (cell->sysBoundaryFlag == sysboundarytype::DO_NOT_COMPUTE) {
             continue;
          }
-
+         if (cell->sysBoundaryFlag == sysboundarytype::OUTFLOW && cell->sysBoundaryLayer != 1 && !initialCompute) { // these should have been handled by the boundary code
+            continue;
+         }
          // Clear old moments to zero value
          if (popID == 0) {
             cell->parameters[CellParams::RHOM_R  ] = 0.0;
@@ -228,7 +229,7 @@ void calculateMoments_R(
             for (int i=0; i<3; ++i) {
                pop.V_R[i]=0;
             }
-            for (int i=0; i<6; ++i) {
+            for (int i=0; i<nMom2; ++i) {
                pop.P_R[i]=0;
             }
             continue;
@@ -240,11 +241,9 @@ void calculateMoments_R(
          Real array[nMom1] = {0};
 
          // Calculate species' contribution to first velocity moments
-         phiprof::Timer firstMomentsTimer {"calcFirstMoments_R"};
          blockVelocityFirstMoments(blockContainer,
                                    array,
                                    nBlocks);
-         firstMomentsTimer.stop();
          // Store species' contribution to bulk velocity moments
          pop.RHO_R = array[0];
          pop.V_R[0] = divideIfNonZero(array[1], array[0]);
@@ -261,9 +260,11 @@ void calculateMoments_R(
 
 #pragma omp parallel for schedule(static)
    for (size_t c=0; c<cells.size(); ++c) {
-      phiprof::Timer computeMomentsCellTimer {"compute-moments-R-cell-bulkV"};
       SpatialCell* cell = mpiGrid[cells[c]];
       if (cell->sysBoundaryFlag == sysboundarytype::DO_NOT_COMPUTE) {
+         continue;
+      }
+      if (cell->sysBoundaryFlag == sysboundarytype::OUTFLOW && cell->sysBoundaryLayer != 1 && !initialCompute) { // these should have been handled by the boundary code
          continue;
       }
       cell->parameters[CellParams::VX_R] = divideIfNonZero(cell->parameters[CellParams::VX_R], cell->parameters[CellParams::RHOM_R]);
@@ -279,10 +280,12 @@ void calculateMoments_R(
    for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
 #pragma omp parallel for schedule(dynamic,1)
       for (size_t c=0; c<cells.size(); ++c) {
-         phiprof::Timer computeMomentsCellTimer {"compute-moments-R-cell-second"};
          SpatialCell* cell = mpiGrid[cells[c]];
 
          if (cell->sysBoundaryFlag == sysboundarytype::DO_NOT_COMPUTE) {
+            continue;
+         }
+         if (cell->sysBoundaryFlag == sysboundarytype::OUTFLOW && cell->sysBoundaryLayer != 1 && !initialCompute) { // these should have been handled by the boundary code
             continue;
          }
 
@@ -303,14 +306,12 @@ void calculateMoments_R(
          Real array[nMom2] = {0};
 
          // Calculate species' contribution to second velocity moments
-         phiprof::Timer secondMomentsTimer {"calcSecondMoments_R"};
          blockVelocitySecondMoments(blockContainer,
                                     cell->parameters[CellParams::VX_R],
                                     cell->parameters[CellParams::VY_R],
                                     cell->parameters[CellParams::VZ_R],
                                     array,
                                     nBlocks);
-         secondMomentsTimer.stop();
          // Store species' contribution to 2nd bulk velocity moments
          Population &pop = cell->get_population(popID);
          for (size_t i = 0; i < nMom2; ++i) {
@@ -331,19 +332,23 @@ void calculateMoments_R(
  * given spatial cell. Additionally, for each species, calculate the maximum
  * spatial time step so that CFL(spatial)=1. The calculated moments include
  * contributions from all existing particle populations. The calculated moments
- * are stored to SpatialCell::parameters in _V variables. This function is AMR safe.
+ * are stored to SpatialCell::parameters in _V variables.
  * @param mpiGrid Parallel grid library.
  * @param cells Vector containing the spatial cells to be calculated.
- * @param computeSecond If true, second velocity moments are calculated.*/
+ * @param computeSecond If true, second velocity moments are calculated.
+ * @param initialCompute If true, force re-calculation of outflow L1 sysboundary cell moments.
+  (otherwise skipped as their VDF contents are not kept up to date)
+*/
 void calculateMoments_V(
    dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
    const std::vector<CellID>& cells,
-   const bool& computeSecond) {
+   const bool& computeSecond,
+   const bool initialCompute) {
 
    // override with optimized GPU version to launch
    // single kernel accessing all cells at once (10x faster)
    #ifdef USE_GPU
-   gpu_calculateMoments_V(mpiGrid,cells,computeSecond);
+   gpu_calculateMoments_V(mpiGrid,cells,computeSecond,initialCompute);
    return;
    #endif
 
@@ -352,10 +357,12 @@ void calculateMoments_V(
    for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
 #pragma omp parallel for schedule(dynamic,1)
       for (size_t c=0; c<cells.size(); ++c) {
-         phiprof::Timer computeMomentsCellTimer {"compute-moments-V-cell"};
          SpatialCell* cell = mpiGrid[cells[c]];
 
          if (cell->sysBoundaryFlag == sysboundarytype::DO_NOT_COMPUTE) {
+            continue;
+         }
+         if (cell->sysBoundaryFlag == sysboundarytype::OUTFLOW && cell->sysBoundaryLayer != 1 && !initialCompute) { // these should have been handled by the boundary code
             continue;
          }
 
@@ -388,7 +395,7 @@ void calculateMoments_V(
             for (int i=0; i<3; ++i) {
                pop.V_V[i]=0;
             }
-            for (int i=0; i<6; ++i) {
+            for (int i=0; i<nMom2; ++i) {
                pop.P_V[i]=0;
             }
             continue;
@@ -401,11 +408,9 @@ void calculateMoments_V(
          Real array[nMom1] = {0};
 
          // Calculate species' contribution to first velocity moments
-         phiprof::Timer firstMomentsTimer {"calcFirstMoments_V"};
          blockVelocityFirstMoments(blockContainer,
                                    array,
                                    nBlocks);
-         firstMomentsTimer.stop();
          // Store species' contribution to bulk velocity moments
          pop.RHO_V = array[0];
          pop.V_V[0] = divideIfNonZero(array[1], array[0]);
@@ -427,6 +432,9 @@ void calculateMoments_V(
       if (cell->sysBoundaryFlag == sysboundarytype::DO_NOT_COMPUTE) {
          continue;
       }
+      if (cell->sysBoundaryFlag == sysboundarytype::OUTFLOW && cell->sysBoundaryLayer != 1 && !initialCompute) { // these should have been handled by the boundary code
+         continue;
+      }
       cell->parameters[CellParams::VX_V] = divideIfNonZero(cell->parameters[CellParams::VX_V], cell->parameters[CellParams::RHOM_V]);
       cell->parameters[CellParams::VY_V] = divideIfNonZero(cell->parameters[CellParams::VY_V], cell->parameters[CellParams::RHOM_V]);
       cell->parameters[CellParams::VZ_V] = divideIfNonZero(cell->parameters[CellParams::VZ_V], cell->parameters[CellParams::RHOM_V]);
@@ -440,10 +448,12 @@ void calculateMoments_V(
    for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
 #pragma omp parallel for schedule(dynamic,1)
       for (size_t c=0; c<cells.size(); ++c) {
-         phiprof::Timer computeMomentsCellTimer {"compute-moments-V-cell"};
          SpatialCell* cell = mpiGrid[cells[c]];
 
          if (cell->sysBoundaryFlag == sysboundarytype::DO_NOT_COMPUTE) {
+            continue;
+         }
+         if (cell->sysBoundaryFlag == sysboundarytype::OUTFLOW && cell->sysBoundaryLayer != 1 && !initialCompute) { // these should have been handled by the boundary code
             continue;
          }
 
@@ -463,17 +473,15 @@ void calculateMoments_V(
          const Real charge = getObjectWrapper().particleSpecies[popID].charge;
 
          // Temporary array where moments are stored
-         Real array[6] = {0};
+         Real array[nMom2] = {0};
 
          // Calculate species' contribution to second velocity moments
-         phiprof::Timer secondMomentsTimer {"calcSecondMoments_V"};
          blockVelocitySecondMoments(blockContainer,
                                     cell->parameters[CellParams::VX_V],
                                     cell->parameters[CellParams::VY_V],
                                     cell->parameters[CellParams::VZ_V],
                                     array,
                                     nBlocks);
-         secondMomentsTimer.stop();
          // Store species' contribution to 2nd bulk velocity moments
          Population &pop = cell->get_population(popID);
          for (size_t i = 0; i < nMom2; ++i) {
