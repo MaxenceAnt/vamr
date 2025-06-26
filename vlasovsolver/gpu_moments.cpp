@@ -182,13 +182,11 @@ __global__ void second_moments_kernel (
    }
 }
 
-// void calculateCellMoments(spatial_cell::SpatialCell* cell,
-//                           const bool& computeSecond,
-//                           const bool& computePopulationMomentsOnly,
-//                           const bool& doNotSkip) {
-// GPUTODO? For a single cell, might as well use ARCH.
-
-
+/**
+    Note: there is no single-cell GPU-only version of moments calculations,
+    (calculateCellMoments) as that task is achieved through the
+    ARCH-interface with no performance loss.
+*/
 
 /** Calculate zeroth, first, and (possibly) second bulk velocity moments for the
  * given spatial cell. The calculated moments include
@@ -241,7 +239,7 @@ void gpu_calculateMoments_R(
             host_VBC[celli] = cell->dev_get_velocity_blocks(popID); // GPU-side VBC
             // Evaluate cached vmesh size
             const vmesh::LocalID meshSize = cell->get_velocity_mesh(popID)->size();
-            threadMaxVmeshSize = meshSize > threadMaxVmeshSize ? meshSize : threadMaxVmeshSize; 
+            threadMaxVmeshSize = meshSize > threadMaxVmeshSize ? meshSize : threadMaxVmeshSize;
 
             // Clear old moments to zero value
             if (popID == 0) {
@@ -260,7 +258,7 @@ void gpu_calculateMoments_R(
          }
          #pragma omp critical
          {
-            maxVmeshSizes.at(popID) = maxVmeshSizes.at(popID) > threadMaxVmeshSize ? maxVmeshSizes.at(popID) : threadMaxVmeshSize; 
+            maxVmeshSizes.at(popID) = maxVmeshSizes.at(popID) > threadMaxVmeshSize ? maxVmeshSizes.at(popID) : threadMaxVmeshSize;
          }
       }
       if (maxVmeshSizes.at(popID) == 0) {
@@ -311,7 +309,6 @@ void gpu_calculateMoments_R(
       } // for-loop over spatial cells
    } // for-loop over particle species
 
-   phiprof::Timer computeMomentsVTimer {"compute-moments-R-cell-bulkV"};
    #pragma omp parallel for schedule(static)
    for (size_t celli=0; celli<nAllCells; ++celli) {
       SpatialCell* cell = mpiGrid[cells[celli]];
@@ -332,7 +329,6 @@ void gpu_calculateMoments_R(
       host_moments1[nMom1*celli + 2] = cell->parameters[CellParams::VY_R];
       host_moments1[nMom1*celli + 3] = cell->parameters[CellParams::VZ_R];
    }
-   computeMomentsVTimer.stop();
 
    // Compute second moments only if requested.
    if (computeSecond == false) {
@@ -440,7 +436,7 @@ void gpu_calculateMoments_V(
             host_VBC[celli] = cell->dev_get_velocity_blocks(popID); // GPU-side VBC
             // Evaluate cached vmesh size
             const vmesh::LocalID meshSize = cell->get_velocity_mesh(popID)->size();
-            threadMaxVmeshSize = meshSize > threadMaxVmeshSize ? meshSize : threadMaxVmeshSize; 
+            threadMaxVmeshSize = meshSize > threadMaxVmeshSize ? meshSize : threadMaxVmeshSize;
 
             // Clear old moments to zero value
             if (popID == 0) {
@@ -459,7 +455,7 @@ void gpu_calculateMoments_V(
          }
 #pragma omp critical
          {
-            maxVmeshSizes.at(popID) = maxVmeshSizes.at(popID) > threadMaxVmeshSize ? maxVmeshSizes.at(popID) : threadMaxVmeshSize; 
+            maxVmeshSizes.at(popID) = maxVmeshSizes.at(popID) > threadMaxVmeshSize ? maxVmeshSizes.at(popID) : threadMaxVmeshSize;
          }
       }
       if (maxVmeshSizes.at(popID) == 0) {
@@ -512,7 +508,6 @@ void gpu_calculateMoments_V(
 
    #pragma omp parallel for schedule(static)
    for (size_t celli=0; celli<nAllCells; ++celli) {
-      phiprof::Timer computeMomentsCellTimer {"compute-moments-R-cell-bulkV"};
       SpatialCell* cell = mpiGrid[cells[celli]];
       if (cell->sysBoundaryFlag == sysboundarytype::DO_NOT_COMPUTE) {
          continue;
