@@ -39,6 +39,8 @@ void recalculateLocalCellsCache(const dccrg::Dccrg<spatial_cell::SpatialCell, dc
 SysBoundary::SysBoundary() {}
 SysBoundary::~SysBoundary() {}
 
+Eigen::MatrixXd inverseSolverMatrix;
+
 // Element Barycentre
 Eigen::Vector3d getElementBarycentre(SphericalTriGrid& grid, uint32_t el) {
    Eigen::Vector3d barycentre(0,0,0);
@@ -83,7 +85,7 @@ Eigen::Vector3d getElementNormal(SphericalTriGrid& grid, uint32_t el) {
 
    normal = edge1.cross(edge2);
 
-   normal.normalize();
+   normal.normalized();
 
    if(normal.dot(getElementBarycentre(grid, el)) < 0) {
       normal *= -1.;
@@ -93,7 +95,7 @@ Eigen::Vector3d getElementNormal(SphericalTriGrid& grid, uint32_t el) {
 }
 
 
-std::tuple<Real, Real> getConnectingSegmentLengths(SphericalTriGrid& grid, uint32_t el1, uint32_t el2) {
+std::tuple<Eigen::Vector3d, Eigen::Vector3d> getConnectingSegmentLengths(SphericalTriGrid& grid, uint32_t el1, uint32_t el2) {
    SphericalTriGrid::Element& element1 = grid.elements[el1];
    SphericalTriGrid::Element& element2 = grid.elements[el2];
 
@@ -193,8 +195,8 @@ std::tuple<Real, Real> getConnectingSegmentLengths(SphericalTriGrid& grid, uint3
                      printf("b0: %lf, b1: %lf, b2: %lf\n", b.x(), b.y(), b.z());
                   }
                   
-                  Real length1 = (barycentre1 - intersection).norm();
-                  Real length2 = (rotatedBarycentre2 - intersection).norm();
+                  // Real length1 = (barycentre1 - intersection).norm();
+                  // Real length2 = (rotatedBarycentre2 - intersection).norm();
                   
 
                   // Ensure lengths are positive
@@ -218,7 +220,7 @@ std::tuple<Real, Real> getConnectingSegmentLengths(SphericalTriGrid& grid, uint3
                   //    printf("Intersection: %lf, %lf, %lf\n", intersection.x(), intersection.y(), intersection.z());
                   //    printf("Length 1: %lf, Length 2: %lf\n", length1, length2);
                   // }
-                  return std::make_tuple(length1, length2); 
+                  return std::make_tuple(barycentre2, intersection); 
             }
          }
       }  
@@ -771,7 +773,7 @@ int main(int argc, char** argv) {
       cerr << " -q:            Quiet mode (only output residual value" << endl;
 
       return 1;
-   }
+   } 
 
    phiprof::initialize();
 
@@ -857,7 +859,7 @@ int main(int argc, char** argv) {
          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
-         Real area = getDualPolygonArea(ionosphereGrid, n);
+         Real area = 1;//getDualPolygonArea(ionosphereGrid, n);
 
          nodes[n].parameters[ionosphereParameters::SOURCE] = sph_legendre(1,0,theta) * cos(0*phi) * area;
       }
@@ -1110,7 +1112,7 @@ int main(int argc, char** argv) {
          //        nodes[elelement.corners[2]].parameters[ionosphereParameters::SOURCE] * elArea/A3);
          vRHS2[el] = (nodes[elelement.corners[0]].parameters[ionosphereParameters::SOURCE] * elArea/A1
               + nodes[elelement.corners[1]].parameters[ionosphereParameters::SOURCE] * elArea/A2
-              + nodes[elelement.corners[2]].parameters[ionosphereParameters::SOURCE] * elArea/A3);
+              + nodes[elelement.corners[2]].parameters[ionosphereParameters::SOURCE] * elArea/A3)/3.;
          // printf("vRHS1[%d] = %le\n", el, vRHS2[el]);
          //print out areas
          // printf("element %d: A = %le, A1 = %le, A2 = %le, A3 = %le\n", el, A, A1, A2, A3);
@@ -1191,31 +1193,145 @@ int main(int argc, char** argv) {
                   cerr << "Error: Element " << nodes[gridCornerIndex].touchingElements[elLocalIndex] << " does not have neighbour with nodes " << gridI << " and " << gridJ << endl;
                   return 1;
                }
-               auto [l1, l2] = getConnectingSegmentLengths(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi);
+
+               Eigen::Vector3d barycentrem = getElementBarycentre(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex]);
+               auto [barycentrei, intersectionmi] = getConnectingSegmentLengths(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi);
                // printf("Connecting lengths between element %d and otherElementi %d: l1 = %le, l2 = %le\n",
                //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi, l1, l2);
                // printf("Element %i, otherElementi %i, l1 = %le, l2 = %le\n",
                //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi, l1, l2);
 
+               Real l1 = (intersectionmi - barycentrem).norm();
+               Real l2 = (intersectionmi - barycentrei).norm();
+
                Eigen::Vector3d rm(nodes[gridCornerIndex].x.data());
                Eigen::Vector3d ri(nodes[gridI].x.data());
+               Eigen::Vector3d rj(nodes[gridJ].x.data());
 
-               Eigen::Vector3d edge = (ri - rm) / (ri - rm).norm();
-                
-               Eigen::Vector3d barycentrem = getElementBarycentre(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex]);
-               Eigen::Vector3d barycentrei = getElementBarycentre(ionosphereGrid, otherElementi);
-               Eigen::Vector3d barycentrej = getElementBarycentre(ionosphereGrid, otherElementj);
-
-               // Transform edges to local coordinate system
-
-               //get normal to the elements
                Eigen::Vector3d normalm = getElementNormal(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex]);
                Eigen::Vector3d normali = getElementNormal(ionosphereGrid, otherElementi);
-               Eigen::Vector3d normalj = getElementNormal(ionosphereGrid, otherElementj);
-               
+
+
+               Eigen::Vector3d edge = (ri - rm) / (ri - rm).norm();
                
                Eigen::Vector3d edgem = Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
                Eigen::Vector3d edgei = Eigen::Quaterniond::FromTwoVectors(normali, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+
+               Eigen::Vector3d rotatedBarycentrem = Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * barycentrem;
+               // printf("rotatedBarycentrem = [%le, %le, %le]\n",
+               //        rotatedBarycentrem(0), rotatedBarycentrem(1), rotatedBarycentrem(2));
+               Eigen::Vector3d rotatedBarycentrei = rm + Eigen::Quaterniond::FromTwoVectors(normali, normalm).toRotationMatrix() * (barycentrei - rm);
+               rotatedBarycentrei = Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * rotatedBarycentrei;
+               // printf("rotatedBarycentrei = [%le, %le, %le]\n",
+               //        rotatedBarycentrei(0), rotatedBarycentrei(1), rotatedBarycentrei(2));
+                      
+
+               Eigen::Vector3d rotBarycentremToBarycentrei = rotatedBarycentrei - rotatedBarycentrem;
+
+               if(rotBarycentremToBarycentrei.norm() - l1 - l2 > 1e-6) {
+                  cerr << "Error: rotBarycentremToBarycentrei norm is not equal to l1 + l2! norm = " << rotBarycentremToBarycentrei.norm() << ", l1 + l2 = " << l1 + l2 << endl;
+               }
+
+               if(std::abs(rotBarycentremToBarycentrei(2)) > 1e-6) {
+                  cerr << "Z component > 0, rotBarycentremToBarycentrei = [" << rotBarycentremToBarycentrei(0) << ", " << rotBarycentremToBarycentrei(1) << ", " << rotBarycentremToBarycentrei(2) << "]" << endl;
+               }
+
+               Eigen::Vector3d perpendicularVectorm = Eigen::Vector3d::UnitZ().cross(rotBarycentremToBarycentrei).normalized();
+
+               Eigen::Vector3d pvm = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), normalm).toRotationMatrix() * perpendicularVectorm;
+               Eigen::Vector3d rim = rm + Eigen::Quaterniond::FromTwoVectors(normali, normalm).toRotationMatrix() * (barycentrei - rm);
+
+               if(pvm.dot((barycentrem - rim).normalized()) > 1e-6) {
+                  cerr << "Error: pvm is not perpendicular to rotBarycentremToBarycentrei! dot = " << pvm.dot(barycentrem - rim) << endl;
+               }
+  
+                
+               if(std::abs(perpendicularVectorm.dot(rotBarycentremToBarycentrei)) > 1e-6) {
+                  cerr << "Error: perpendicularVectorm is not perpendicular to rotBarycentremToBarycentrei! dot = " << perpendicularVectorm.dot(rotBarycentremToBarycentrei) << endl;
+               } 
+  
+               if(perpendicularVectorm.dot(edgem) < 0) {
+                  perpendicularVectorm = -perpendicularVectorm;
+               }
+ 
+               rotatedBarycentrem = rm + Eigen::Quaterniond::FromTwoVectors(normalm, normali).toRotationMatrix() * (barycentrem - rm);
+               rotatedBarycentrem = Eigen::Quaterniond::FromTwoVectors(normali, Eigen::Vector3d::UnitZ()).toRotationMatrix() * rotatedBarycentrem;
+               rotatedBarycentrei = Eigen::Quaterniond::FromTwoVectors(normali, Eigen::Vector3d::UnitZ()).toRotationMatrix() * barycentrei;
+ 
+               if((rotatedBarycentrem - rotatedBarycentrei).norm() - l1 - l2 > 1e-6) {
+                  cerr << "Error: rotatedBarycentrem - rotatedBarycentrei norm is not equal to l1 + l2! norm = " << (rotatedBarycentrem - rotatedBarycentrei).norm() << ", l1 + l2 = " << l1 + l2 << endl;
+               }
+
+               if((rotatedBarycentrem - rotatedBarycentrei)(2) > 1e-6) {
+                  cerr << "Error: Z component of rotatedBarycentrem - rotatedBarycentrei is not zero! value = " << (rotatedBarycentrem - rotatedBarycentrei)(2) << endl;
+               }
+               Eigen::Vector3d perpendicularVectori = Eigen::Vector3d::UnitZ().cross(rotatedBarycentrem - rotatedBarycentrei).normalized();
+
+
+               if(perpendicularVectori(2) > 1e-6) { 
+                  cerr << "Error: Z component of perpendicularVectori is not zero! value = " << perpendicularVectori(2) << endl;
+               }
+
+               if(std::abs(perpendicularVectori.dot(rotatedBarycentrem - rotatedBarycentrei)) > 1e-6) {
+                  cerr << "Error: perpendicularVectorm is not perpendicular to rotBarycentremToBarycentrei! dot = " << perpendicularVectorm.dot(rotBarycentremToBarycentrei) << endl;
+               }
+
+               if(perpendicularVectori.dot(edgei) < 0) {   
+                  perpendicularVectori = -perpendicularVectori;
+               }
+
+               // if(gridCornerIndex == 52) { 
+               //    printf("Node %d", gridCornerIndex);
+               //    printf("Elementm %d, Elementi %d\n",
+               //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi); 
+               //    rj = rm + Eigen::Quaterniond::FromTwoVectors(normalm, normali).toRotationMatrix() * (rj - rm);
+               //    printf("rm = [%le, %le, %le], ri = [%le, %le, %le], rj = [%le, %le, %le]\n",
+               //          rm(0), rm(1), rm(2),
+               //          ri(0), ri(1), ri(2),
+               //          rj(0), rj(1), rj(2));
+               //    // Position of corners of otherElementi
+               //    Eigen::Vector3d r0i(nodes[ionosphereGrid.elements[otherElementi].corners[0]].x.data());
+               //    Eigen::Vector3d r1i(nodes[ionosphereGrid.elements[otherElementi].corners[1]].x.data());
+               //    Eigen::Vector3d r2i(nodes[ionosphereGrid.elements[otherElementi].corners[2]].x.data());
+               //    // r0i = rm + Eigen::Quaterniond::FromTwoVectors(normali, normalm).toRotationMatrix() * (r0i - rm);
+               //    // r1i = rm + Eigen::Quaterniond::FromTwoVectors(normali, normalm).toRotationMatrix() * (r1i - rm);
+               //    // r2i = rm + Eigen::Quaterniond::FromTwoVectors(normali, normalm).toRotationMatrix() * (r2i - rm);
+               //    printf("r0i = [%le, %le, %le], r1i = [%le, %le, %le], r2i = [%le, %le, %le]\n",
+               //          r0i(0), r0i(1), r0i(2),
+               //          r1i(0), r1i(1), r1i(2),
+               //          r2i(0), r2i(1), r2i(2));
+               //    edgem = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), normalm).toRotationMatrix() * edgem;
+               //    edgei = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), normali).toRotationMatrix() * edgei;
+               //    printf("Edge vectors: edgem = [%le, %le, %le], edgei = [%le, %le, %le]\n",
+               //          edgem(0), edgem(1), edgem(2),
+               //          edgei(0), edgei(1), edgei(2));
+               //    perpendicularVectorm = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), normalm).toRotationMatrix() * perpendicularVectorm;
+               //    perpendicularVectori = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), normali).toRotationMatrix() * perpendicularVectori;
+               //    printf("Perpendicular vectors: perpendicularVectorm = [%le, %le, %le], perpendicularVectori = [%le, %le, %le]\n",
+               //          perpendicularVectorm(0), perpendicularVectorm(1), perpendicularVectorm(2),
+               //          perpendicularVectori(0), perpendicularVectori(1), perpendicularVectori(2));
+                  
+                  
+               //    cerr << "Error: Perpendicular vector to edgei is not equal to edgem! norm = " << (perpendicularVectorm - edgem).norm() << endl;
+               // } 
+
+               // if((perpendicularVectorm - edgem).norm() > 0.1) {
+               //    printf("Corner node %d, touching element %d, other element %d\n",
+               //           gridCornerIndex, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi);
+               //    cerr << "Error: Perpendicular vector to edgem is not equal to edgem! norm = " << (perpendicularVectorm - edgem).norm() << endl;
+               // }
+               // if((perpendicularVectori - edgei).norm() > 0.1) {
+               //    printf("Corner node %d, touching element %d, other element %d\n",
+               //           gridCornerIndex, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi);
+               //    cerr << "Error: Perpendicular vector to edgei is not equal to edgei! norm = " << (perpendicularVectori - edgei).norm() << endl;
+               // }
+
+               // Eigen::Vector3d barycenterim = rm + Eigen::Quaterniond::FromTwoVectors(normali, normalm).toRotationMatrix() * (barycentrei - rm);
+               
+               // Eigen::Vector3d barycentermz = rm + Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * (barycentrem - rm);
+               // Eigen::Vector3d barycenterimz = rm + Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * (barycentreim - rm);
+
+               // Eigen::Vector3d surfaceNormalm = (barycenterim - barycenterm) / (barycenterim - barycenterm).norm(); 
 
                // printf("Edge vectors: edgem = [%le, %le, %le], edgei = [%le, %le, %le]\n",
                //        edgem(0), edgem(1), edgem(2),
@@ -1226,11 +1342,14 @@ int main(int argc, char** argv) {
                   cerr << "Error: Edge vectors are not in the XY plane! edgem = [" << edgem(0) << ", " << edgem(1) << ", " << edgem(2) << "], edgei = [" << edgei(0) << ", " << edgei(1) << ", " << edgei(2) << "]" << endl;
                }
 
+               Real ltot = l1 + l2;
+
+
                // Division by 2 due to double counting
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(3.*dualPolygonArea)) * (edgem(0) * l1 / (2.));
-               curlSolverMatrix.coeffRef(el, 2 * otherElementi) += (elArea/(3.*dualPolygonArea)) * edgei(0) * l2 / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(3.*dualPolygonArea)) * edgem(1) * l1 / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * otherElementi + 1) += (elArea/(3.*dualPolygonArea)) * edgei(1) * l2 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (perpendicularVectorm(0) * l1 / (2.));
+               curlSolverMatrix.coeffRef(el, 2 * otherElementi) += perpendicularVectori(0) * l2 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += perpendicularVectorm(1) * l1 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * otherElementi + 1) += perpendicularVectori(1) * l2 / (2.);
 
                // printf("elArea = %le, dualPolygonArea = %le, l1 = %le, l2 = %le, (elArea/(dualPolygonArea)) * edgem(0) * l1 / (2.) = %le, (elArea/(dualPolygonArea)) * edgei(0) * l2 / (2.) = %le\n",
                //          elArea, dualPolygonArea, l1, l2,
@@ -1246,19 +1365,58 @@ int main(int argc, char** argv) {
                // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1, curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1));
                // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * otherElementi + 1, curlSolverMatrix.coeffRef(el, 2 * otherElementi + 1));
 
-               std::tie(l1, l2) = getConnectingSegmentLengths(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementj);
+               auto [barycentrej, intersectionmj] = getConnectingSegmentLengths(ionosphereGrid, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementj);
+
+               l1 = (intersectionmj - barycentrem).norm();
+               l2 = (intersectionmj - barycentrej).norm();
 
                // printf("Connecting lengths between element %d and otherElementj %d: l1 = %le, l2 = %le\n",
                //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementj, l1, l2);
                // printf("Element %i, otherElementi %i, l1 = %le, l2 = %le\n",
                //        nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi, l1, l2);
 
-               Eigen::Vector3d rj(nodes[gridJ].x.data());
-
                edge = (rj - rm) / (rj - rm).norm();
+               
+               Eigen::Vector3d normalj = getElementNormal(ionosphereGrid, otherElementj);
                
                edgem = Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
                Eigen::Vector3d edgej = Eigen::Quaterniond::FromTwoVectors(normalj, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
+
+               rotatedBarycentrem = Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * barycentrem;
+               Eigen::Vector3d rotatedBarycentrej = rm + Eigen::Quaterniond::FromTwoVectors(normalj, normalm).toRotationMatrix() * (barycentrej - rm);
+               rotatedBarycentrej = Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * rotatedBarycentrej;
+               Eigen::Vector3d rotBarycentremToBarycentrej = rotatedBarycentrej - rotatedBarycentrem;
+
+               if(rotBarycentremToBarycentrej.norm() - l1 - l2 > 1e-6) {
+                  cerr << "Error: rotBarycentremToBarycentrej norm is not equal to l1 + l2! norm = " << rotBarycentremToBarycentrej.norm() << ", l1 + l2 = " << l1 + l2 << endl;
+               }
+ 
+               if(std::abs(rotBarycentremToBarycentrej(2)) > 1e-6) {
+                  cerr << "Z component > 0, rotBarycentremToBarycentrej = [" << rotBarycentremToBarycentrej(0) << ", " << rotBarycentremToBarycentrej(1) << ", " << rotBarycentremToBarycentrej(2) << "]" << endl;
+               }
+               perpendicularVectorm = Eigen::Vector3d::UnitZ().cross(rotBarycentremToBarycentrej).normalized();
+               if(perpendicularVectorm.dot(edgem) < 0) {
+                  perpendicularVectorm = -perpendicularVectorm;
+               }
+
+               rotatedBarycentrem = rm + Eigen::Quaterniond::FromTwoVectors(normalm, normalj).toRotationMatrix() * (barycentrem - rm);
+               rotatedBarycentrem = Eigen::Quaterniond::FromTwoVectors(normalj, Eigen::Vector3d::UnitZ()).toRotationMatrix() * rotatedBarycentrem;
+               rotatedBarycentrej = Eigen::Quaterniond::FromTwoVectors(normalj, Eigen::Vector3d::UnitZ()).toRotationMatrix() * barycentrej;
+               Eigen::Vector3d perpendicularVectorj = Eigen::Vector3d::UnitZ().cross(rotatedBarycentrem - rotatedBarycentrej).normalized();
+               if(perpendicularVectorj.dot(edgej) < 0) {
+                  perpendicularVectorj = -perpendicularVectorj; 
+               }
+
+               // if((perpendicularVectorm - edgem).norm() > 0.15) {
+               //    printf("Corner node %d, touching element %d, other element %d\n",
+               //           gridCornerIndex, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi);
+               //    cerr << "Error: Perpendicular vector to edgem is not equal to edgem! norm = " << (perpendicularVectorm - edgem).norm() << endl;
+               // }
+               // if((perpendicularVectorj - edgej).norm() > 0.15) {
+               //    printf("Corner node %d, touching element %d, other element %d\n",
+               //           gridCornerIndex, nodes[gridCornerIndex].touchingElements[elLocalIndex], otherElementi);
+               //    cerr << "Error: Perpendicular vector to edgej is not equal to edgej! norm = " << (perpendicularVectorj - edgej).norm() << endl;
+               // } 
 
                // printf("Edge vectors: edgem = [%le, %le, %le], edgej = [%le, %le, %le]\n",
                //        edgem(0), edgem(1), edgem(2),
@@ -1272,19 +1430,21 @@ int main(int argc, char** argv) {
                //        edgei(0), edgei(1), edgei(2), 
                //        edge(0), edge(1), edge(2));
 
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += (elArea/(3.*dualPolygonArea)) * edgem(0) * l1 / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * otherElementj) += (elArea/(3.*dualPolygonArea)) * edgej(0) * l2 / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += (elArea/(3.*dualPolygonArea)) * edgem(1) * l1 / (2.);
-               curlSolverMatrix.coeffRef(el, 2 * otherElementj + 1) += (elArea/(3.*dualPolygonArea)) * edgej(1) * l2 / (2.);
+               ltot = l1 + l2;
+
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]) += perpendicularVectorm(0) * l1 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * otherElementj) += perpendicularVectorj(0) * l2 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1) += perpendicularVectorm(1) * l1 / (2.);
+               curlSolverMatrix.coeffRef(el, 2 * otherElementj + 1) += perpendicularVectorj(1) * l2 / (2.);
 
                // printf("elArea = %le, dualPolygonArea = %le, l1 = %le, l2 = %le, (elArea/(dualPolygonArea)) * edgem(0) * l1 / (2.) = %le, (elArea/(dualPolygonArea)) * edgej(0) * l2 / (2.) = %le, \n",
                //          elArea, dualPolygonArea, l1, l2,
-               //          (elArea/(dualPolygonArea)) * edgem(0) * l1 / (2.),
-               //          (elArea/(dualPolygonArea)) * edgej(0) * l2 / (2.));
+               //          (elArea/(dualPolygonArea)) * edgem(0) * l1 / (2.), 
+               //          (elArea/(dualPolygonArea)) * edgej(0) * l2 / (2.)); 
                // printf("(elArea/(dualPolygonArea)) * edgem(1) * l1 / (2.) = %le, (elArea/(dualPolygonArea)) * edgej(1) * l2 / (2.) = %le\n",
                //          (elArea/(dualPolygonArea)) * edgem(1) * l1 / (2.),
                //          (elArea/(dualPolygonArea)) * edgej(1) * l2 / (2.));
-               
+                
                // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex], curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex]));
                // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * otherElementj, curlSolverMatrix.coeffRef(el, 2 * otherElementj));
                // printf("curlSolverMatrix.coeffRef(%d, %d) = %le\n", el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1, curlSolverMatrix.coeffRef(el, 2 * nodes[gridCornerIndex].touchingElements[elLocalIndex] + 1));
@@ -1335,58 +1495,71 @@ int main(int argc, char** argv) {
          cout << "Done." << endl;
       }
       // Add curlJ constraints for every element until the solver is happy.
-      // for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-      //    SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
-      //    Real A = ionosphereGrid.elementArea(el);
+      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+         SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
+         Real A = ionosphereGrid.elementArea(el);
 
-      //    if(!quiet && (el % 100) == 0) {
-      //       cout << "Adding curl constraints: " << el << "/" << ionosphereGrid.elements.size() << endl;
-      //    }
+         if(!quiet && (el % 100) == 0) {
+            cout << "Adding curl constraints: " << el << "/" << ionosphereGrid.elements.size() << endl;
+         }
 
-      //    // Apply the discrete DPP-flat operator to the element-centered vector field to
-      //    // obtain an edge-aligned 1-form, then calculate the discrete curl by taking
-      //    // the integral of the 1-form along the boundary of the element divided by the
-      //    // area; that is, summing the inner product of the edge-aligned 1-form with the 
-      //    // edge vectors of the element d\fivided by the area.
-      //    //
-      //    // The inner product between the 1-form, obtained by the action of the discrete 
-      //    // DPP-flat operator on centre-aligned vector fields, with an edge vector is 
-      //    // calculated on each edge by a weighted sum of the inner product of the vectors 
-      //    // associated with each of the elements adjacent to the edge in question with the
-      //    // edge vector by the ratio of how much each element encloses the line segment 
-      //    // connecting the centres of the two elements to the total length of this line segment.
-      //    //
-      //    // In this implementation, we use the barycentres of the elements as the centres of the elements.
+         // Apply the discrete DPP-flat operator to the element-centered vector field to
+         // obtain an edge-aligned 1-form, then calculate the discrete curl by taking
+         // the integral of the 1-form along the boundary of the element divided by the
+         // area; that is, summing the inner product of the edge-aligned 1-form with the 
+         // edge vectors of the element d\fivided by the area.
+         //
+         // The inner product between the 1-form, obtained by the action of the discrete 
+         // DPP-flat operator on centre-aligned vector fields, with an edge vector is 
+         // calculated on each edge by a weighted sum of the inner product of the vectors 
+         // associated with each of the elements adjacent to the edge in question with the
+         // edge vector by the ratio of how much each element encloses the line segment 
+         // connecting the centres of the two elements to the total length of this line segment.
+         //
+         // In this implementation, we use the barycentres of the elements as the centres of the elements.
          
-      //    for (int c = 0; c < 3; c++) {
-      //       int i = element.corners[c];
-      //       int j = element.corners[(c + 1) % 3];
+         for (int c = 0; c < 3; c++) {
+            int i = element.corners[c];
+            int j = element.corners[(c + 1) % 3];
 
-      //       Eigen::Vector3d ri(nodes[i].x.data());
-      //       Eigen::Vector3d rj(nodes[j].x.data());
+            Eigen::Vector3d ri(nodes[i].x.data());
+            Eigen::Vector3d rj(nodes[j].x.data()); 
+            Real length = (rj - ri).norm();
 
-      //       auto [e, orientation] = getEdgeIndexOrientation(i, j);
+            auto [e, orientation] = getEdgeIndexOrientation(i, j);
 
-      //       Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
-      //       Eigen::Vector3d edgeParallel = orientation * Eigen::Quaterniond::FromTwoVectors(barycentre.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
+            Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
+            Eigen::Vector3d normal = getElementNormal(ionosphereGrid, el);
+            Eigen::Vector3d edgeParallel = Eigen::Quaterniond::FromTwoVectors(normal, Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
 
-      //       uint32_t adjacentElementIndex = ionosphereGrid.findElementNeighbour(el, c, (c + 1) % 3);
-      //       Eigen::Vector3d adjacentBarycentre = getElementBarycentre(ionosphereGrid, adjacentElementIndex);
-      //       Eigen::Vector3d adjacentEdgeParallel = orientation * Eigen::Quaterniond::FromTwoVectors(adjacentBarycentre.normalized(), Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
+            if(edgeParallel(2) > 1e-6) {
+               cerr << "Error: Edge parallel vector is not in the XY plane! edgeParallel = [" << edgeParallel(0) << ", " << edgeParallel(1) << ", " << edgeParallel(2) << "]" << endl;
+            }
 
-      //       auto [l1, l2] = getConnectingSegmentLengths(ionosphereGrid, el, adjacentElementIndex);
-      //       Real ltot = l1 + l2;
+            uint32_t adjacentElementIndex = ionosphereGrid.findElementNeighbour(el, c, (c + 1) % 3);
+            Eigen::Vector3d adjacentBarycentre = getElementBarycentre(ionosphereGrid, adjacentElementIndex);
+            Eigen::Vector3d adjacentNormal = getElementNormal(ionosphereGrid, adjacentElementIndex);
+            Eigen::Vector3d adjacentEdgeParallel = Eigen::Quaterniond::FromTwoVectors(adjacentNormal, Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
 
-      //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex) += edgeParallel(0) * l1 / (ltot * A);
-      //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size()+ el, 2 * el) += adjacentEdgeParallel(0) * l2 / (ltot * A);
+            if(adjacentEdgeParallel(2) > 1e-6) {
+               cerr << "Error: Adjacent edge parallel vector is not in the XY plane! adjacentEdgeParallel = [" << adjacentEdgeParallel(0) << ", " << adjacentEdgeParallel(1) << ", " << adjacentEdgeParallel(2) << "]" << endl;
+            }
 
-      //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex + 1) += edgeParallel(1) * l1 / (ltot * A);
-      //       curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * el + 1) += adjacentEdgeParallel(1) * l2 / (ltot * A);
-      //    }
+            auto [barycentre2, intersection] = getConnectingSegmentLengths(ionosphereGrid, el, adjacentElementIndex);
+            Real l1 = (intersection - barycentre).norm();  
+            Real l2 = (intersection - barycentre2).norm(); 
+            Real ltot = l1 + l2; 
+   
+            curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex) += adjacentEdgeParallel(0) * l1/ltot;
+            curlSolverMatrix.coeffRef(ionosphereGrid.elements.size()+ el, 2 * el) += edgeParallel(0) * l2/ltot;
 
+            curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * adjacentElementIndex + 1) += adjacentEdgeParallel(1) * l1/ltot;
+            curlSolverMatrix.coeffRef(ionosphereGrid.elements.size() + el, 2 * el + 1) += edgeParallel(1) * l2/ltot;
+         }
 
-
-      //    int i = element.corners[0];
+ 
+ 
+      //    int i = element.corners[0]; 
       //    int j = element.corners[1];
       //    int k = element.corners[2];
 
@@ -1417,7 +1590,7 @@ int main(int argc, char** argv) {
       //    vRHS2[ionosphereGrid.elements.size() + el] = 0;
          
 
-      // }
+      }
 
       // Add Harmonic constraint (by pinning a cross-equator current to zero)
       // for(const auto& [hash, edgeIdx] : edgeIndex) {
@@ -1434,6 +1607,8 @@ int main(int argc, char** argv) {
       // }
 
       curlSolverMatrix.makeCompressed();
+      // Eigen::MatrixXd tempMatrix = curlSolverMatrix;
+      // inverseSolverMatrix = tempMatrix.inverse();
 
       if(writeSolverMtarix) {
          ofstream matrixOut("JSolverMatrix.txt");
@@ -1459,7 +1634,11 @@ int main(int argc, char** argv) {
       // Solve curl-free currents.
       cout << "Solving divJ system" << endl;
       Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
+      // Eigen::SparseLU<Eigen::SparseMatrix<Real>> solver;
       solver.compute(curlSolverMatrix);
+      // if(solver.info() != Eigen::Success) {
+      //    printf("Error: Matrix decomposition failed!\n"); 
+      // }
       vJ = solver.solve(vRHS2);
       cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
 
@@ -1645,7 +1824,7 @@ int main(int argc, char** argv) {
       //    };
 
       //    Eigen::Vector3d b(nodes[n].x.data());
-      //    b.normalize();
+      //    b.normalized();
       //    if(nodes[n].x[2] >= 0) {
       //       b *= -1;
       //    }
@@ -1802,6 +1981,29 @@ int main(int argc, char** argv) {
 
          return retval;
    }));
+
+   if(ionosphereGrid.nodes.size() < 200) {
+         for(uint i=0; i<ionosphereGrid.elements.size(); i++) {
+            outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jDivFromNode" + to_string(i), [&,i](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+                     std::vector<Real> retval(3*grid.elements.size());
+
+                     std::vector<Real> faceValues(grid.elements.size());
+                     for(uint e=0; e<2*grid.elements.size(); e++) {
+                        faceValues[e] = inverseSolverMatrix.coeffRef(e, i);
+                     }
+
+                     for(uint el=0; el<grid.elements.size(); el++) {
+                        Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
+                        Eigen::Vector3d J = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), barycentre.normalized()).toRotationMatrix() * Eigen::Vector3d(faceValues[2*el], faceValues[2*el+1], 0);
+                        retval[3*el] = J(0); 
+                        retval[3*el+1] = J(1);
+                        retval[3*el+2] = J(2); 
+                     }
+
+                     return retval; 
+                     }));
+         }
+      }
       outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_rowsum", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
          std::vector<Real> retval(grid.elements.size());
 
