@@ -176,7 +176,6 @@ Eigen::Vector3d getCommonEdgeMidpoint(SphericalTriGrid& grid, uint32_t el1, uint
    }  
 }
 
-
 Real getDualPolygonArea(SphericalTriGrid& grid, uint gridNode){
    Real A = 0.;
    for(uint i = 0; i < grid.nodes[gridNode].numTouchingElements; i++){
@@ -874,8 +873,8 @@ int main(int argc, char** argv) {
 
    // Eigen vector and matrix for solving
    Eigen::VectorXd vJ(2 * ionosphereGrid.elements.size()); // 2 * ionosphereGrid.elements.size() because we have two components of J in every element 
-   Eigen::VectorXd vRHS1(ionosphereGrid.nodes.size() + ionosphereGrid.elements.size()); // Right hand side for divergence-free system
-   Eigen::VectorXd vRHS2(ionosphereGrid.nodes.size() + ionosphereGrid.elements.size()); // Right hand side for curl-free system
+   Eigen::VectorXd vRHS1(ionosphereGrid.nodes.size() + ionosphereGrid.nodes.size()); // Right hand side for divergence-free system
+   Eigen::VectorXd vRHS2(ionosphereGrid.nodes.size() + ionosphereGrid.nodes.size()); // Right hand side for curl-free system
    Eigen::SparseMatrix<Real> curlSolverMatrix(vRHS1.size(), vJ.size());
 
    // Set conductivity tensors
@@ -936,36 +935,27 @@ int main(int argc, char** argv) {
       // Then, solve divergence-free part.
       // Finally, estimate Sigmas.
 
+      // This formalism uses a cirumcentre-based current-density vector field. 
+      // For more details, see Hirani (2003) "Discrete Exterior Calculus" PhD 
+      // thesis.
+      // 
+      // To calculate the divergence at a specific node, the current density is
+      // first interpolated to all the edges subtended by this node by weighing
+      // the current-density of the elements subtended by a particular edge by
+      // the proportion of the distances from the circumcentres to the midpoint
+      // of that edge, to the line connecting the two circumcentres. This line
+      // will always be the perpendicular bisector of the common edge, thanks to
+      // the fact that circumcentres are equidistant from the corners of a
+      // triangle. Then, the dot product of the edge-interpolated current
+      // densities with the edge parallel is taken, multiplied by the length of
+      // the dual to this edge, and summed over all edges subtended by the node. 
+      // 
+      // Since the mesh is not flat, the edge vectors are be transformed to a
+      // common coordinate system (XY plane at the north pole) before the dot
+      // product is taken 
 
       if(!quiet) {
          cerr << "Using curlJ solver." << endl;
-      }
-
-      if(!quiet) {
-         cerr << "Calculating edge lengths." << endl;
-      }
-
-      // Fill edge arrays
-      for(uint32_t el=0; el<ionosphereGrid.elements.size(); el++) {
-         SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
-
-         int i=element.corners[0],j=element.corners[1],k=element.corners[2];
-         Eigen::Vector3d r0(nodes[i].x.data());
-         Eigen::Vector3d r1(nodes[j].x.data());
-         Eigen::Vector3d r2(nodes[k].x.data());
-
-         // Edge length 
-         auto [e,orientation] = getEdgeIndexOrientation(i,j);
-         edgeLength[e] = (r0-r1).norm();
-
-         std::tie(e, orientation) = getEdgeIndexOrientation(j,k);
-         edgeLength[e] = (r1-r2).norm();
-
-         std::tie(e, orientation) = getEdgeIndexOrientation(k,i);
-         edgeLength[e] = (r0-r2).norm();
-      }
-      if(!quiet) {
-         cerr << "Done." << endl;
       }
 
       if(!quiet) {
@@ -988,7 +978,6 @@ int main(int argc, char** argv) {
          
          //Divergence of curl-free current
          vRHS2[gridNodeIndex] = nodes[gridNodeIndex].parameters[ionosphereParameters::SOURCE];
-         Real dualPolygonArea = getDualPolygonArea(ionosphereGrid, gridNodeIndex);
 
          for(uint32_t elLocalIndex=0; elLocalIndex<nodes[gridNodeIndex].numTouchingElements; elLocalIndex++) {
             SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[gridNodeIndex].touchingElements[elLocalIndex]];
@@ -1007,6 +996,8 @@ int main(int argc, char** argv) {
                }
             }
 
+            
+
             int32_t otherElementi = ionosphereGrid.findElementNeighbour(nodes[gridNodeIndex].touchingElements[elLocalIndex], localC, localI);
             int32_t otherElementj = ionosphereGrid.findElementNeighbour(nodes[gridNodeIndex].touchingElements[elLocalIndex], localC, localJ);
 
@@ -1024,7 +1015,7 @@ int main(int argc, char** argv) {
             Eigen::Vector3d rj(nodes[gridJ].x.data());
             Eigen::Vector3d edge = (ri - rm) / (ri - rm).norm();
 
-            Eigen::Vector3d normalm = getElementNormal(ionosphereGrid, nodes[gridNodeIndex].touchingElements[elLocalIndex]);               
+            Eigen::Vector3d normalm = getElementNormal(ionosphereGrid, nodes[gridNodeIndex].touchingElements[elLocalIndex]);
             Eigen::Vector3d edgem = Eigen::Quaterniond::FromTwoVectors(normalm, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edge;
 
             // check if z value of edges exceeds 1e-6
@@ -1056,51 +1047,76 @@ int main(int argc, char** argv) {
       if(!quiet) {
          cout << "Done." << endl;
       }
-      // Add curlJ constraints for every element until the solver is happy.
-      for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-         SphericalTriGrid::Element& element = ionosphereGrid.elements[el];
-         Eigen::Vector3d circumcentre = getElementCircumcentre(ionosphereGrid, el);
+      if(!quiet) {
+         cout << "Adding curl constraints." << endl;
+      }
 
-         if(!quiet && (el % 100) == 0) {
-            cout << "Adding curl constraints: " << el << "/" << ionosphereGrid.elements.size() << endl;
+      // The curl at a specific node is calculated by taking half the dot product
+      // of the edges opposite to the node with the current-density of the
+      // elements subtended by the node, multiplied by a consistent orientation.
+
+      // Curl constraints 
+      for(uint n=0; n<ionosphereGrid.nodes.size(); n++) {
+         if(!quiet && (n % 100) == 0) {
+            cout << "Adding curl constraints: " << n << "/" << ionosphereGrid.nodes.size() << endl;
          }
 
-         for (int c = 0; c < 3; c++) {
-            int i = element.corners[c];
-            int j = element.corners[(c + 1) % 3];
-            auto [e, orientation] = getEdgeIndexOrientation(i, j);
+         // Curl of divergence-free current
+         vRHS1[ionosphereGrid.nodes.size() + n] = ionosphereGrid.nodes[n].parameters[ionosphereParameters::SOURCE];
 
-            Eigen::Vector3d ri(nodes[i].x.data());
-            Eigen::Vector3d rj(nodes[j].x.data()); 
-            Eigen::Vector3d normal = getElementNormal(ionosphereGrid, el);
-            Eigen::Vector3d edgeParallel = Eigen::Quaterniond::FromTwoVectors(normal, Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
+         // Curl of curl-free current
+         vRHS2[ionosphereGrid.nodes.size() + n] = 0;
+         
+         for(uint32_t elLocalIndex=0; elLocalIndex<ionosphereGrid.nodes[n].numTouchingElements; elLocalIndex++) {
+            SphericalTriGrid::Element& element = ionosphereGrid.elements[ionosphereGrid.nodes[n].touchingElements[elLocalIndex]];
 
-            if(edgeParallel(2) > 1e-6) {
-               cerr << "Error: Edge parallel vector is not in the XY plane! edgeParallel = [" << edgeParallel(0) << ", " << edgeParallel(1) << ", " << edgeParallel(2) << "]" << endl;
+            // Find the two other nodes on this element 
+            int gridI=0,gridJ=0;
+            int localC=0,localI=0,localJ=0;
+            for(int c=0; c< 3; c++) {
+               if(element.corners[c] == n) {
+                  localC = c;
+                  localI = (c+1)%3;
+                  gridI=element.corners[localI];
+                  localJ = (c+2)%3;
+                  gridJ=element.corners[localJ];
+                  break; 
+               }
             }
 
-            uint adjacentElementIndex = ionosphereGrid.findElementNeighbour(el, c, (c + 1) % 3);
-            Eigen::Vector3d adjacentCircumcentre = getElementCircumcentre(ionosphereGrid, adjacentElementIndex);
-            Eigen::Vector3d adjacentNormal = getElementNormal(ionosphereGrid, adjacentElementIndex);
-            Eigen::Vector3d adjacentEdgeParallel = Eigen::Quaterniond::FromTwoVectors(adjacentNormal, Eigen::Vector3d::UnitZ()).toRotationMatrix() * (rj - ri);
+            Eigen::Vector3d normal = getElementNormal(ionosphereGrid, ionosphereGrid.nodes[n].touchingElements[elLocalIndex]);
+            Eigen::Vector3d ri(nodes[gridI].x.data());
+            Eigen::Vector3d rj(nodes[gridJ].x.data());
+            Eigen::Vector3d rm(nodes[n].x.data());
 
-            if(adjacentEdgeParallel(2) > 1e-6) {
-               cerr << "Error: Adjacent edge parallel vector is not in the XY plane! adjacentEdgeParallel = [" << adjacentEdgeParallel(0) << ", " << adjacentEdgeParallel(1) << ", " << adjacentEdgeParallel(2) << "]" << endl;
+            Eigen::Vector3d edgemi = (ri - rm) / (ri - rm).norm();
+            edgemi = Eigen::Quaterniond::FromTwoVectors(normal, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edgemi;
+
+            if(std::abs(edgemi(2)) > 1e-6) {
+               cerr << "Error: Z component of edgemi is not zero! edgemi = [" << edgemi(0) << ", " << edgemi(1) << ", " << edgemi(2) << "]" << endl;
             }
 
+            Eigen::Vector3d edgemj = (rj - rm) / (rj - rm).norm();
+            edgemj = Eigen::Quaterniond::FromTwoVectors(normal, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edgemj;
 
-            Eigen::Vector3d midpoint = getCommonEdgeMidpoint(ionosphereGrid, el, adjacentElementIndex);
-            Real l1 = (midpoint - circumcentre).norm();  
-            Real l2 = (midpoint - adjacentCircumcentre).norm(); 
-            Real ltot = l1 + l2; 
-   
-            curlSolverMatrix.coeffRef(ionosphereGrid.nodes.size() + el, 2 * adjacentElementIndex) += adjacentEdgeParallel(0) * l2/ltot;
-            curlSolverMatrix.coeffRef(ionosphereGrid.nodes.size()+ el, 2 * el) += edgeParallel(0) * l1/ltot;
+            if(std::abs(edgemj(2)) > 1e-6) {
+               cerr << "Error: Z component of edgemj is not zero! edgemj = [" << edgemj(0) << ", " << edgemj(1) << ", " << edgemj(2) << "]" << endl;
+            }
 
-            curlSolverMatrix.coeffRef(ionosphereGrid.nodes.size() + el, 2 * adjacentElementIndex + 1) += adjacentEdgeParallel(1) * l2/ltot;
-            curlSolverMatrix.coeffRef(ionosphereGrid.nodes.size() + el, 2 * el + 1) += edgeParallel(1) * l1/ltot;
-         } 
-  
+            Real orientation = edgemj.cross(edgemi).dot(normal) > 0 ? 1. : -1.;
+
+            Eigen::Vector3d outerEdge = orientation * (rj - ri) / (rj - ri).norm();
+            Real outerEdgeLength = (rj - ri).norm();
+            outerEdge = Eigen::Quaterniond::FromTwoVectors(normal, Eigen::Vector3d::UnitZ()).toRotationMatrix() * outerEdge;
+            
+            if(outerEdge(2) >  1e-6) {
+               cerr << "Error: Outer edge vector is not in the XY plane! outerEdge = [" << outerEdge(0) << ", " << outerEdge(1) << ", " << outerEdge(2) << "]" << endl;
+            }
+
+            curlSolverMatrix.coeffRef(ionosphereGrid.nodes.size() + n, 2 * ionosphereGrid.nodes[n].touchingElements[elLocalIndex]) += outerEdge(0) * outerEdgeLength / 2.;
+            curlSolverMatrix.coeffRef(ionosphereGrid.nodes.size() + n, 2 * ionosphereGrid.nodes[n].touchingElements[elLocalIndex] + 1) += outerEdge(1) * outerEdgeLength / 2.;
+         }
+
 
       }
 
@@ -1112,19 +1128,17 @@ int main(int argc, char** argv) {
       //   // Find first edge that crosses the equator
       //   if(nodes[node1].x[0] * nodes[node2].x[0] < 0) {
       //      curlSolverMatrix.insert(curlSolverMatrix.rows()-1, edgeIdx) = 1.;
-      //      vRHS1[vRHS1.size()-1] = 0.;
+      //      vRHS1[vRHS1.size()-1] = 0.; 
       //      vRHS2[vRHS2.size()-1] = 0.;
       //      break;
       //   }
       // }
 
       curlSolverMatrix.makeCompressed();
-      // Eigen::MatrixXd tempMatrix = curlSolverMatrix;
-      // inverseSolverMatrix = tempMatrix.inverse();
 
       if(writeSolverMtarix) {
          ofstream matrixOut("JSolverMatrix.txt");
-         for(uint n=0; n<ionosphereGrid.nodes.size() + ionosphereGrid.elements.size(); n++) {
+         for(uint n=0; n<ionosphereGrid.nodes.size() + ionosphereGrid.nodes.size(); n++) {
             for(uint m=0; m<2*ionosphereGrid.elements.size(); m++) {
 
                Real val=0;
@@ -1148,23 +1162,13 @@ int main(int argc, char** argv) {
       // Solve curl-free currents.
       cout << "Solving divJ system" << endl;
       Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
-      // Eigen::SparseLU<Eigen::SparseMatrix<Real>> solver;
       solver.compute(curlSolverMatrix);
-      // if(solver.info() != Eigen::Success) {
-      //    printf("Error: Matrix decomposition failed!\n"); 
-      // }
       vJ = solver.solve(vRHS2);
       cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
 
-      
-
-
-      // for(uint e=0; e<ionosphereGrid.elements.size(); e++) {
-      //    edgeJDiv[e] = vJ[e];
-      // }
-
       // Interpolate edge-localized J_CF to elements
       for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+         cout << "Calculating curl-free current for element " << el << "/" << ionosphereGrid.elements.size() << endl;
          // Average J from edge values, using Whitney 1-forms (DOI: 10.1145/1141911.1141991)
          std::array<uint32_t, 3>& corners = ionosphereGrid.elements[el].corners;
          Real A = ionosphereGrid.elementArea(el);
@@ -1217,7 +1221,7 @@ int main(int argc, char** argv) {
          // Note: The coefficients want to be looked up in A/km, so we multiply by 1000
          Real correction = pow(c4H(MLT)/c4P(MLT) * 1000*elementCurlFreeCurrent[el].norm(),1./(1.+c5P(MLT)-c5H(MLT))) / (1000*elementCurlFreeCurrent[el].norm());
          elementCorrectionFactors[el] = correction;
-         vRHS1[ionosphereGrid.nodes.size() + el] *= correction;
+         // vRHS1[ionosphereGrid.nodes.size() + el] *= correction;
       }
 
       // cout << "Solving curlJ system with " << nodes.size() << " nodes, " << ionosphereGrid.elements.size() << " elements and " << edgeLength.size() << " edges.\n";
@@ -1496,20 +1500,20 @@ int main(int argc, char** argv) {
          return retval;
    }));
 
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_rowsum", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
-         std::vector<Real> retval(grid.elements.size());
+   //    outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_rowsum", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
+   //       std::vector<Real> retval(grid.elements.size());
 
-         //sum of row corresponding to element in matrix curlSolverMatrix
-         for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-            retval[el] = 0; 
+   //       //sum of row corresponding to element in matrix curlSolverMatrix
+   //       for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+   //          retval[el] = 0; 
 
-            for(uint m=0; m<2*ionosphereGrid.elements.size(); m++) {
-               retval[el] += std::abs(curlSolverMatrix.coeff(el,m));
-            }
-         }
+   //          for(uint m=0; m<2*ionosphereGrid.elements.size(); m++) {
+   //             retval[el] += std::abs(curlSolverMatrix.coeff(el,m));
+   //          }
+   //       }
  
-         return retval;
-   }));  
+   //       return retval;
+   // }));  
     
       outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_vRHS2", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
          std::vector<Real> retval(grid.elements.size());
@@ -1521,22 +1525,22 @@ int main(int argc, char** argv) {
  
          return retval;
    }));
-        outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_ratio", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
-         std::vector<Real> retval(grid.elements.size());
+   //      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_ratio", [&](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
+   //       std::vector<Real> retval(grid.elements.size());
 
-         for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-            retval[el] = 0;
-            for(uint m=0; m<2*ionosphereGrid.elements.size(); m++) {
-               retval[el] += curlSolverMatrix.coeff(el,m)*curlSolverMatrix.coeff(el,m);
-            }
-         }
+   //       for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+   //          retval[el] = 0;
+   //          for(uint m=0; m<2*ionosphereGrid.elements.size(); m++) {
+   //             retval[el] += curlSolverMatrix.coeff(el,m)*curlSolverMatrix.coeff(el,m);
+   //          }
+   //       }
 
-         for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
-            retval[el] /= vRHS2[el];
-         }
+   //       for(uint el=0; el<ionosphereGrid.elements.size(); el++) {
+   //          retval[el] /= vRHS2[el];
+   //       }
  
-         return retval;
-   }));
+   //       return retval;
+   // }));
    outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_source", [](SBC::SphericalTriGrid& grid) -> std::vector<Real> {
          std::vector<Real> retval(grid.nodes.size());
 
