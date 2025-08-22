@@ -193,7 +193,6 @@ namespace SBC {
       void updateIonosphereCommunicator(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, FsGrid< fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid); /*!< (Re-)create the subcommunicator for ionosphere-internal communication */
       void initializeTetrahedron();       /*!< Initialize grid as a base tetrahedron */
       void initializeOctahedron();        /*!< Initialize grid as a base octahedron */
-      void initializeOctahedron();        /*!< Initialize grid as a base octahedron */
       void initializeIcosahedron();       /*!< Initialize grid as a base icosahedron */
       void initializeSphericalFibonacci(int n); /*!< Initialize grid as a spherical fibonacci lattice */
       void initializeGridFromFile(std::string path); /*!< Initialize grid from an OBJ or VTK file */
@@ -366,7 +365,7 @@ namespace SBC {
 
          normal.normalized();
 
-         if(normal.dot(elementCircumcentre(grid, el)) < 0) {
+         if(normal.dot(elementCircumcentre(el)) < 0) {
             normal *= -1.;
          }
 
@@ -429,7 +428,7 @@ namespace SBC {
             Eigen::Vector3d midpointi = commonEdgeMidpoint(gridEl, otherElementi);
             Eigen::Vector3d midpointj = commonEdgeMidpoint(gridEl, otherElementj);
 
-            Eigen::Vector3d circumcentre = elementCircumcentre(grid, gridEl);
+            Eigen::Vector3d circumcentre = elementCircumcentre(gridEl);
 
             Real heighti = (nodePosition - midpointi).norm();
             Real heightj = (nodePosition - midpointj).norm();
@@ -465,7 +464,7 @@ namespace SBC {
          Eigen::Vector3d midpointi = commonEdgeMidpoint(gridElem, otherElementi);
          Eigen::Vector3d midpointj = commonEdgeMidpoint(gridElem, otherElementj);
 
-         Eigen::Vector3d circumcentre = elementCircumcentre(grid, gridElem);
+         Eigen::Vector3d circumcentre = elementCircumcentre(gridElem);
 
          Real heighti = (nodePosition - midpointi).norm();
          Real heightj = (nodePosition - midpointj).norm();
@@ -487,53 +486,6 @@ namespace SBC {
             area += elementArea(n.touchingElements[i]);
          }
          return area;
-      }
-
-      // Area of the dual polygon around the given node
-      // (Note: This is *not* equal to nodeNeighborArea / 3)
-      Real dualPolygonArea(uint gridNode){
-         Real A = 0.;
-         for(uint i = 0; i < nodes[gridNode].numTouchingElements; i++){
-            uint32_t gridEl = nodes[gridNode].touchingElements[i];
-            Eigen::Vector3d nodePosition(nodes[gridNode].x.data());
-            SphericalTriGrid::Element& element = elements[gridEl];
-
-            int localC=0,localI=0,localJ=0;
-            for(int c=0; c < 3; c++) {
-               if(element.corners[c] == gridNode) {
-                  localC = c;
-                  localI = (c+1)%3;
-                  localJ = (c+2)%3;
-                  break;
-               }
-            }
-
-            uint otherElementi = findElementNeighbour(gridEl, localC, localI);
-            uint otherElementj = findElementNeighbour(gridEl, localC, localJ);
-
-            Eigen::Vector3d centerm = elementBarycentre(gridEl);
-            Eigen::Vector3d centeri = elementBarycentre(otherElementi);
-            Eigen::Vector3d centerj = elementBarycentre(otherElementj);
-
-            Eigen::Vector3d normalm = elementNormal(gridEl);
-            Eigen::Vector3d normali = elementNormal(otherElementi);
-            Eigen::Vector3d normalj = elementNormal(otherElementj);
-
-            Eigen::Vector3d rotatedCenteri = nodePosition + Eigen::Quaternion<Real>::FromTwoVectors(normali, normalm).toRotationMatrix() * (centeri - nodePosition);
-            Eigen::Vector3d rotatedCenterj = nodePosition + Eigen::Quaternion<Real>::FromTwoVectors(normalj, normalm).toRotationMatrix() * (centerj - nodePosition);
-
-            Eigen::Vector3d edgeNodeM = nodePosition - centerm;
-            Eigen::Vector3d edgeNodeI = nodePosition - rotatedCenteri;
-            Eigen::Vector3d edgeNodeJ = nodePosition - rotatedCenterj;
-
-            Real areaMI = edgeNodeM.cross(edgeNodeI).norm() / 2.;
-            Real areaMJ = edgeNodeM.cross(edgeNodeJ).norm() / 2.;
-
-            // Double counting
-            A += (areaMI + areaMJ) / 2.;
-
-         }
-         return A;
       }
 
       // Calculate neighbor's Barycentre and dual polygon - edge - intersection point.
