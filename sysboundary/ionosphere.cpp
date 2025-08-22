@@ -3324,6 +3324,8 @@ namespace SBC {
          ionizationModel = SphericalTriGrid::SergienkoIvanov;
       } else if (ionizationModelString == "Robinson2020") {
          ionizationModel = SphericalTriGrid::Robinson2020;
+      } else if (ionizationModelString == "Juusola2025") {
+         ionizationModel = SphericalTriGrid::Juusola2025;
       } else {
          cerr << "(IONOSPHERE) Unknown ionization production model \"" << ionizationModelString << "\". Aborting." << endl;
          abort();
