@@ -193,8 +193,10 @@ namespace SBC {
       void updateConnectivity();          /*!< Re-link elements and nodes */
       void updateIonosphereCommunicator(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, FsGrid< fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid); /*!< (Re-)create the subcommunicator for ionosphere-internal communication */
       void initializeTetrahedron();       /*!< Initialize grid as a base tetrahedron */
+      void initializeOctahedron();        /*!< Initialize grid as a base octahedron */
       void initializeIcosahedron();       /*!< Initialize grid as a base icosahedron */
       void initializeSphericalFibonacci(int n); /*!< Initialize grid as a spherical fibonacci lattice */
+      void initializeGridFromFile(std::string path); /*!< Initialize grid from an OBJ or VTK file */
       int32_t findElementNeighbour(uint32_t e, int n1, int n2);
       uint32_t findNodeAtCoordinates(std::array<Real,3> x); /*!< Find the mesh node closest to the given coordinate */
       void subdivideElement(uint32_t e);  /*!< Subdivide mesh within element e */
@@ -305,6 +307,174 @@ namespace SBC {
          barycentre /= 3.;
 
          return barycentre;
+      }
+
+      Eigen::Vector3d elementCircumcentre(uint el) {
+         Eigen::Vector3d circumcentre(0,0,0);
+
+         SphericalTriGrid::Element& element = elements[el];
+         uint corner1 = element.corners[0];
+         uint corner2 = element.corners[1];
+         uint corner3 = element.corners[2];
+
+         Eigen::Vector3d a(nodes[corner1].x.data());
+         Eigen::Vector3d b(nodes[corner2].x.data());
+         Eigen::Vector3d c(nodes[corner3].x.data());
+
+         Eigen::Vector3d edge1 = b - a;
+         Eigen::Vector3d edge2 = c - a;
+
+         Eigen::Vector3d edge1Mid = a + edge1 / 2.;
+         Eigen::Vector3d edge2Mid = a + edge2 / 2.;
+
+         Eigen::Vector3d normal = edge1.cross(edge2).normalized();
+
+         if(normal.dot(a) < 0) {
+            normal *= -1.;
+         }
+
+         Eigen::Vector3d edge1Perpendicular = normal.cross(edge1).normalized();
+         Eigen::Vector3d edge2Perpendicular = normal.cross(edge2).normalized();
+
+         Eigen::Matrix<Real, 3, 2> A;
+         A.col(0) = edge1Perpendicular;
+         A.col(1) = - edge2Perpendicular;
+         Eigen::Vector3d bVec = edge2Mid - edge1Mid;
+         Eigen::Vector2d t = A.colPivHouseholderQr().solve(bVec);
+         Eigen::Vector3d residual = A * t - bVec;
+
+         return circumcentre;
+      }
+
+      Eigen::Vector3d elementNormal(uint32_t el) {
+         Eigen::Vector3d normal(0,0,0);
+
+         SphericalTriGrid::Element& element = elements[el];
+         uint32_t corner1 = element.corners[0];
+         uint32_t corner2 = element.corners[1];
+         uint32_t corner3 = element.corners[2];
+
+         Eigen::Vector3d a(nodes[corner1].x.data());
+         Eigen::Vector3d b(nodes[corner2].x.data());
+         Eigen::Vector3d c(nodes[corner3].x.data());
+
+         Eigen::Vector3d edge1 = b - a;
+         Eigen::Vector3d edge2 = c - a;
+
+         normal = edge1.cross(edge2);
+
+         normal.normalized();
+
+         if(normal.dot(getElementCircumcentre(grid, el)) < 0) {
+            normal *= -1.;
+         }
+
+         return normal;
+      }
+
+      Eigen::Vector3d commonEdgeMidpoint(uint32_t el1, uint32_t el2) {
+         SphericalTriGrid::Element& element1 = elements[el1];
+         SphericalTriGrid::Element& element2 = elements[el2];
+
+         // Get common edge to these two elements
+         for(uint i=0; i<3; i++) {
+            if(element1.corners[i] == element2.corners[0] ||
+               element1.corners[i] == element2.corners[1] ||
+               element1.corners[i] == element2.corners[2]) {
+               for(uint j=0; j<3; j++) {
+                  if(i != j && (element1.corners[j] == element2.corners[0] ||
+                              element1.corners[j] == element2.corners[1] ||
+                              element1.corners[j] == element2.corners[2])) {
+
+                        uint corner1 = element1.corners[i];
+                        uint corner2 = element1.corners[j];
+
+                        Eigen::Vector3d a(nodes[corner1].x.data());
+                        Eigen::Vector3d b(nodes[corner2].x.data());
+                                 
+                        Eigen::Vector3d midpoint = (a + b) / 2.;
+                        return midpoint;
+                  }
+               }
+            }  
+         }  
+      }
+
+      Real getDualPolygonArea(uint gridNode){
+         Real A = 0.;
+         
+         for(uint i = 0; i < nodes[gridNode].numTouchingElements; i++){
+            uint32_t gridEl = nodes[gridNode].touchingElements[i];
+            Eigen::Vector3d nodePosition(nodes[gridNode].x.data());
+
+            SphericalTriGrid::Element& element = elements[gridEl];
+
+            int gridI=0,gridJ=0;
+            int localC=0,localI=0,localJ=0;
+            for(int c=0; c < 3; c++) {
+               if(element.corners[c] == gridNode) {
+                  localC = c;
+                  localI = (c+1)%3;
+                  gridI=element.corners[localI];
+                  localJ = (c+2)%3;
+                  gridJ=element.corners[localJ];
+                  break;
+               }
+            }
+
+            uint otherElementi = findElementNeighbour(gridEl, localC, localI);
+            uint otherElementj = findElementNeighbour(gridEl, localC, localJ);
+
+            Eigen::Vector3d midpointi = getCommonEdgeMidpoint(grid, gridEl, otherElementi);
+            Eigen::Vector3d midpointj = getCommonEdgeMidpoint(grid, gridEl, otherElementj);
+
+            Eigen::Vector3d circumcentre = getElementCircumcentre(grid, gridEl);
+
+            Real heighti = (nodePosition - midpointi).norm();
+            Real heightj = (nodePosition - midpointj).norm();
+
+            Real basei = (circumcentre - midpointi).norm();
+            Real basej = (circumcentre - midpointj).norm();
+
+            A += (0.5 * basei * heighti) + (0.5 * basej * heightj);
+         }
+
+         return A;
+      }
+
+      Real areaInDualPolygon(uint gridNode, uint gridElem) {
+         Real A = 0.;
+
+         Eigen::Vector3d nodePosition(nodes[gridNode].x.data());
+         SphericalTriGrid::Element& element = elements[gridElem];
+
+         int localC=0,localI=0,localJ=0;
+         for(int c=0; c < 3; c++) {
+            if(element.corners[c] == gridNode) {
+               localC = c;
+               localI = (c+1)%3;
+               localJ = (c+2)%3;
+               break;
+            }
+         }
+
+         uint otherElementi = findElementNeighbour(gridElem, localC, localI);
+         uint otherElementj = findElementNeighbour(gridElem, localC, localJ);
+
+         Eigen::Vector3d midpointi = getCommonEdgeMidpoint(grid, gridElem, otherElementi);
+         Eigen::Vector3d midpointj = getCommonEdgeMidpoint(grid, gridElem, otherElementj);
+
+         Eigen::Vector3d circumcentre = getElementCircumcentre(grid, gridElem);
+
+         Real heighti = (nodePosition - midpointi).norm();
+         Real heightj = (nodePosition - midpointj).norm();
+
+         Real basei = (circumcentre - midpointi).norm();
+         Real basej = (circumcentre - midpointj).norm();
+
+         A += (0.5 * basei * heighti) + (0.5 * basej * heightj);
+
+         return A;
       }
 
       Real nodeNeighbourArea(uint32_t nodeIndex) { // Summed area of all touching elements
@@ -467,7 +637,8 @@ namespace SBC {
       uint geometry; /*!< Geometry of the ionosphere, 0: inf-norm (diamond), 1: 1-norm (square), 2: 2-norm (circle, DEFAULT), 3: polar-plane cylinder with line dipole. */
 
 
-      std::string baseShape; /*!< Basic mesh shape (sphericalFibonacci / icosahedron / tetrahedron) */
+      std::string baseShape; /*!< Basic mesh shape (fromFile / sphericalFibonacci / icosahedron / tetrahedron) */
+      std::string path; /*!< Path to ionosphere grid mesh file */
       int fibonacciNodeNum;  /*!< If spherical fibonacci: number of nodes to generate */
       Real earthAngularVelocity; /*!< Earth rotation vector, in radians/s */
       Real plasmapauseL; /*!< L-Value at which the plasma pause resides (everything inside corotates) */
