@@ -14,6 +14,9 @@
 #include <Eigen/Sparse>
 #include <Eigen/Geometry>
 
+#define NODE_CONSTRAINT_REDUCTION 1
+#define ELEMENT_CONSTRAINT_REDUCTION 1
+
 using namespace std;
 using namespace SBC;
 using namespace vlsv;
@@ -38,6 +41,8 @@ void updateRemoteVelocityBlockLists(dccrg::Dccrg<spatial_cell::SpatialCell, dccr
 void recalculateLocalCellsCache(const dccrg::Dccrg<spatial_cell::SpatialCell, dccrg::Cartesian_Geometry, std::tuple<>, std::tuple<> >&) {};
 SysBoundary::SysBoundary() {}
 SysBoundary::~SysBoundary() {}
+
+
 
 Eigen::Vector3d getElementBarycentre(SphericalTriGrid& grid, uint32_t el) {
    Eigen::Vector3d barycentre(0,0,0);
@@ -630,6 +635,129 @@ std::tuple<uint,int> getEdgeIndexOrientation(uint32_t a, uint32_t b)  {
    return {edgeIndex[hash], orientation};
 }
 
+// Interpolate edge-based quantity to elements (barycentres) using Whitney 1-forms.
+// (DOI: 10.1145/1141911.1141991)
+Eigen::Vector3d whitneyInterpolate(SphericalTriGrid& grid, uint32_t el, std::vector<Real> edgeValue) {
+   std::array<uint32_t, 3>& corners = grid.elements[el].corners;
+   Real A = grid.elementArea(el);
+
+   auto [e1,o1] = getEdgeIndexOrientation(corners[0],corners[1]);
+   auto [e2,o2] = getEdgeIndexOrientation(corners[1],corners[2]);
+   auto [e3,o3] = getEdgeIndexOrientation(corners[2],corners[0]);
+
+   Eigen::Vector3d r0(grid.nodes[corners[0]].x.data());
+   Eigen::Vector3d r1(grid.nodes[corners[1]].x.data());
+   Eigen::Vector3d r2(grid.nodes[corners[2]].x.data());
+
+   Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
+
+   // Barycentric coordinates
+   auto lambda1 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+      return ((r0-p).cross(r1-p)).norm() / (2*A);
+   };
+   auto lambda2 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+      return ((r1-p).cross(r2-p)).norm() / (2*A);
+   };
+   auto lambda3 = [&r0,&r1,&r2,&A](const Eigen::Vector3d& p) {
+      return ((r2-p).cross(r0-p)).norm() / (2*A);
+   };
+
+   // Barycentric gradients (these are constant per element)
+   Eigen::Vector3d gradLambda1 = edgeLength[e1] / (2 * A) * (r1-r0).cross(r2-r0).cross(r1-r0).normalized();
+   Eigen::Vector3d gradLambda2 = edgeLength[e2] / (2 * A) * (r2-r1).cross(r0-r1).cross(r2-r1).normalized();
+   Eigen::Vector3d gradLambda3 = edgeLength[e3] / (2 * A) * (r2-r0).cross(r1-r0).cross(r2-r0).normalized();
+
+   // Whitney 1-form basis functions
+   auto w1 = [&](const Eigen::Vector3d& p) {
+      return lambda2(p) * gradLambda3 - lambda3(p) * gradLambda2;
+   };
+   auto w2 = [&](const Eigen::Vector3d& p) {
+      return lambda3(p) * gradLambda1 - lambda1(p) * gradLambda3;
+   };
+   auto w3 = [&](const Eigen::Vector3d& p) {
+      return lambda1(p) * gradLambda2 - lambda2(p) * gradLambda1;
+   };
+
+   // Effective interpolated value this element
+   return o1*edgeLength[e1]*edgeValue[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeValue[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeValue[e3] *w3(barycentre);
+}
+
+// Interpolate edge-based quantity to nodes, by bisecting the node in coordinate-orthohonal planes and calculating the fluxes through those planes
+Eigen::Vector3d interpolateEdgeToNode(SphericalTriGrid& grid, uint32_t n, std::vector<Real> edgeValue) {
+
+   Eigen::Vector3d Jl(0,0,0), Jr(0,0,0);
+
+   // Sum incoming and outgoing edge vectors coordinate-component wise
+   Eigen::Vector3d summedPathl(0,0,0), summedPathr(0,0,0);
+   for(uint32_t el=0; el< grid.nodes[n].numTouchingElements; el++) {
+      int32_t elementn = grid.nodes[n].touchingElements[el];
+      SphericalTriGrid::Element& element = grid.elements[elementn];
+      // Find the two other nodes on this element
+      int i=0,j=0;
+      int cn=0,ci=0,cj=0;
+      for(int c=0; c< 3; c++) {
+         if(element.corners[c] == n) {
+            cn = c;
+            ci = (c+1)%3;
+            i=element.corners[ci];
+            cj = (c+2)%3;
+            j=element.corners[cj];
+            break;
+         }
+      }
+      Eigen::Vector3d ri(grid.nodes[i].x.data());
+      Eigen::Vector3d rj(grid.nodes[j].x.data());
+      Eigen::Vector3d rn(grid.nodes[n].x.data());
+
+      int32_t otherElementi = grid.findElementNeighbour(elementn, cn, ci);
+      int32_t otherElementj = grid.findElementNeighbour(elementn, cn, cj);
+
+      auto [barycentrei,intersectioni] = getConnectingSegmentLengths(ionosphereGrid, elementn, otherElementi);
+      auto [barycentrej,intersectionj] = getConnectingSegmentLengths(ionosphereGrid, elementn, otherElementj);
+
+      Eigen::Vector3d barycentren = getElementBarycentre(ionosphereGrid, elementn);
+      auto [e,orientation] = getEdgeIndexOrientation(n,i);
+      Eigen::Vector3d vi = (ri-rn).normalized();
+      Eigen::Vector3d segmenti = barycentren-intersectioni;
+      for(int c =0; c<3; c++) {
+         Eigen::Vector3d ec(0,0,0);
+         ec[c]=1;
+
+         // Sum coordinate-negative and coordinate-positive currents separately
+         Real projectedPath = (segmenti - segmenti[c]*ec).norm();
+         if(vi[c] > 0) {
+            Jr[c] += edgeValue[e] * orientation * vi[c] * projectedPath;
+            summedPathr[c] += projectedPath;
+         } else {
+            Jr[c] += edgeValue[e] * orientation * vi[c] * projectedPath;
+            summedPathl[c] += projectedPath;
+         }
+      }
+
+      std::tie(e,orientation) = getEdgeIndexOrientation(n,j);
+      Eigen::Vector3d vj = (rj-rn).normalized();
+      Eigen::Vector3d segmentj = barycentren-intersectionj;
+      for(int c =0; c<3; c++) {
+         Eigen::Vector3d ec(0,0,0);
+         ec[c]=1;
+
+         // Sum coordinate-negative and coordinate-positive currents separately
+         Real projectedPath = (segmentj - segmentj[c]*ec).norm();
+         if(vj[c] > 0) {
+            Jr[c] += edgeValue[e] * orientation * vj[c] * projectedPath;
+            summedPathr[c] += projectedPath;
+         } else {
+            Jr[c] += edgeValue[e] * orientation * vj[c] * projectedPath;
+            summedPathl[c] += projectedPath;
+         }
+      }
+   }
+   Jr = Jr.array() / summedPathr.array();
+   Jl = Jl.array() / summedPathl.array();
+
+   return (Jl+Jr)/2;
+}
+
 int main(int argc, char** argv) {
 
    // Init MPI
@@ -895,6 +1023,7 @@ int main(int argc, char** argv) {
          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
+         Real area = getDualPolygonArea(ionosphereGrid, n);
          Real area = getDualPolygonArea(ionosphereGrid, n);
          nodes[n].parameters[ionosphereParameters::SOURCE] = sph_legendre(1,0,theta) * cos(0*phi) * area;
       }
@@ -1290,6 +1419,10 @@ int main(int argc, char** argv) {
       }
 
       curlSolverMatrix.makeCompressed();
+      if(ionosphereGrid.nodes.size() < 200) {
+         Eigen::MatrixXd tempMatrix = curlSolverMatrix;
+         inverseSolverMatrix = tempMatrix.inverse();
+      }
 
       if(writeSolverMatrix) {
          ofstream matrixOut("JSolverMatrix.txt");
@@ -1317,7 +1450,11 @@ int main(int argc, char** argv) {
 
       // Solve curl-free currents.
       cout << "Solving divJ system" << endl;
+#if 1 //NODE_CONSTRAINT_REDUCTION+ELEMENT_CONSTRAINT_REDUCTION != 2
       Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
+#else
+      Eigen::BiCGSTAB<Eigen::SparseMatrix<Real>> solver;
+#endif
       solver.compute(curlSolverMatrix);
       vJ = solver.solve(vRHS2);
       cout << "... done with " << solver.iterations() << " iterations and remaining error " << solver.error() << "\n";
@@ -1335,6 +1472,7 @@ int main(int argc, char** argv) {
          Eigen::Vector3d rotatedVJ = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), barycentre.normalized()).toRotationMatrix() * Eigen::Vector3d(vJ[2*el], vJ[2*el+1], 0);
          elementCurlFreeCurrent[el] = rotatedVJ;
 
+         Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
          Real MLT = atan2(barycentre[1], barycentre[0]) * 12 / M_PI + 12;
 
          // Note: The coefficients want to be looked up in A/km, so we multiply by 1000
@@ -1388,7 +1526,7 @@ int main(int argc, char** argv) {
       // Next, evaluate Sigma as a function of inplane-J and MLT
       #pragma omp parallel for
       for(uint n=0; n < nodes.size(); n++) {
-         Eigen::Vector3d J(0,0,0);
+         Eigen::Vector3d J=interpolateEdgeToNode(ionosphereGrid, n, edgeJCurl);
          Eigen::Vector3d x(nodes[n].x.data());
 
          Real totalA=0;
@@ -2044,8 +2182,8 @@ int main(int argc, char** argv) {
       //      }
       //      return retval;
       //}));
-      //outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_dualPolygonArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
-      //      std::vector<Real> retval(grid.nodes.size());
+      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_dualPolygonArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+            std::vector<Real> retval(grid.nodes.size());
 
       //      for(uint n=0; n<grid.nodes.size(); n++) {
       //         Real dualPolygonArea = 0;

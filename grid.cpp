@@ -364,7 +364,12 @@ void initializeGrids(
       calculateInitialVelocityMoments(mpiGrid);
    } else {
       phiprof::Timer timer {"Init moments"};
+      #pragma omp parallel for schedule(guided,1)
       for (size_t i=0; i<cells.size(); ++i) {
+         // easier to skip here than adding one more bool flag to calculateCellMoments - handles L2 outflow cells without VDF
+         if(mpiGrid[cells[i]]->sysBoundaryFlag == sysboundarytype::OUTFLOW && mpiGrid[cells[i]]->sysBoundaryLayer != 1) {
+            continue;
+         }
          calculateCellMoments(mpiGrid[cells[i]], true, true);
       }
    }
@@ -678,13 +683,14 @@ void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, S
    }
 
 #ifdef USE_GPU
-   phiprof::Timer gpuMallocTimer("GPU_malloc");
+   phiprof::Timer gpuReservationsTimer("GPU LB set cell reservations");
    uint gpuMaxBlockCount = 0;
    vmesh::LocalID gpuBlockCount = 0;
    // Not parallelized
    const vector<CellID>& newCells = getLocalCells();
+   const uint newCellsSize = newCells.size();
    const std::vector<CellID>& remote_cells = mpiGrid.get_remote_cells_on_process_boundary(Neighborhoods::FULL);
-   for (uint i=0; i<newCells.size()+remote_cells.size(); ++i) {
+   for (uint i=0; i<newCellsSize+remote_cells.size(); ++i) {
       SpatialCell* SC;
       if (i < newCells.size()) {
          SC = mpiGrid[newCells[i]];
@@ -704,12 +710,13 @@ void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, S
          SC->dev_upload_population(popID);
       }
    }
-   // Call GPU routines for per-thread memory allocation for Vlasov solvers
+   gpuReservationsTimer.stop();
+   // Call GPU routines for memory allocation for Vlasov solvers
    // deallocates first if necessary
-   //GPUTODO: Also count how many pencils exist
-   gpu_vlasov_allocate(gpuMaxBlockCount);
-   gpu_acc_allocate(gpuMaxBlockCount);
-   gpuMallocTimer.stop();
+   phiprof::Timer gpuAllocationsTimer("GPU LB set buffer allocations");
+   gpu_vlasov_allocate(gpuMaxBlockCount,newCellsSize);
+   gpu_acc_allocate(gpuMaxBlockCount,newCellsSize);
+   gpuAllocationsTimer.stop();
 #endif // end USE_GPU
 
 }
@@ -761,20 +768,18 @@ bool adjustVelocityBlocks(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& m
    // Batch call
    update_velocity_block_content_lists(mpiGrid,cells,popID);
 
-   if (doPrepareToReceiveBlocks) {
-      // We are in the last substep of acceleration, so need to account for neighbours
-      phiprof::Timer transferTimer {"Transfer with_content_list", {"MPI"}};
-      SpatialCell::set_mpi_transfer_type(Transfer::VEL_BLOCK_WITH_CONTENT_STAGE1 );
-      mpiGrid.update_copies_of_remote_neighbors(Neighborhoods::NEAREST);
-      SpatialCell::set_mpi_transfer_type(Transfer::VEL_BLOCK_WITH_CONTENT_STAGE2 );
-      mpiGrid.update_copies_of_remote_neighbors(Neighborhoods::NEAREST);
-      transferTimer.stop();
-   }
+   // Get updated lists for blocks with content in spatial neighbours
+   phiprof::Timer transferTimer {"Transfer with_content_list", {"MPI"}};
+   SpatialCell::set_mpi_transfer_type(Transfer::VEL_BLOCK_WITH_CONTENT_STAGE1 );
+   mpiGrid.update_copies_of_remote_neighbors(Neighborhoods::NEAREST);
+   SpatialCell::set_mpi_transfer_type(Transfer::VEL_BLOCK_WITH_CONTENT_STAGE2 );
+   mpiGrid.update_copies_of_remote_neighbors(Neighborhoods::NEAREST);
+   transferTimer.stop();
 
    // Batch adjusts velocity blocks in local spatial cells, doesn't adjust velocity blocks in remote cells.
-   adjust_velocity_blocks_in_cells(mpiGrid, cellsToAdjust, popID, doPrepareToReceiveBlocks);
+   adjust_velocity_blocks_in_cells(mpiGrid, cellsToAdjust, popID);
 
-   // prepare to receive block data
+   // prepare to receive full block data for all cells (irrespective of list of cells to adjust)
    if (doPrepareToReceiveBlocks) {
       if (P::vlasovSolverGhostTranslate) {
          updateRemoteVelocityBlockLists(mpiGrid,popID,Neighborhoods::VLASOV_SOLVER_GHOST);
@@ -1255,7 +1260,7 @@ void mapRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
 
 bool adaptRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, FsGrid<fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid, SysBoundary& sysBoundaries, Project& project, int useStatic) {
    phiprof::Timer amrTimer {"Re-refine spatial cells"};
-   int refines {0};
+   uint64_t refines {0};
    if (useStatic > -1) {
       project.forceRefinement(mpiGrid, useStatic);
    } else {
@@ -1269,9 +1274,9 @@ bool adaptRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGri
       refines = project.adaptRefinement(mpiGrid);
    }
 
-   int cells = getLocalCells().size();
-   MPI_Allreduce(MPI_IN_PLACE, &refines, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &cells, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+   uint64_t cells {getLocalCells().size()};
+   MPI_Allreduce(MPI_IN_PLACE, &refines, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &cells, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
    double ratio_refines = static_cast<double>(refines) / static_cast<double>(cells);
    logFile << "(AMR) Refining " << refines << " cells, " << 100.0 * ratio_refines << "% of grid" << std::endl;
 
@@ -1281,10 +1286,8 @@ bool adaptRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGri
    mpiGrid.initialize_refines();
    initTimer.stop();
 
-   refines = mpiGrid.get_local_cells_to_refine().size();
-   double coarsens = mpiGrid.get_local_cells_to_unrefine().size();
-   MPI_Allreduce(MPI_IN_PLACE, &refines, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &coarsens, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+   refines = mpiGrid.get_cells_to_refine_count();
+   uint64_t coarsens {mpiGrid.get_cells_to_unrefine_count()};
    ratio_refines = static_cast<double>(refines) / static_cast<double>(cells);
    double ratio_coarsens = static_cast<double>(coarsens) / static_cast<double>(cells);
    logFile << "(AMR) Refining " << refines << " cells after induces, " << 100.0 * ratio_refines << "% of grid" << std::endl;

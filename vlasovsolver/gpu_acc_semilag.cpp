@@ -1,6 +1,6 @@
 /*
  * This file is part of Vlasiator.
- * Copyright 2010-2024 Finnish Meteorological Institute and University of Helsinki
+ * Copyright 2010-2025 Finnish Meteorological Institute and University of Helsinki
  *
  * For details of usage, see the COPYING file and read the "Rules of the Road"
  * at http://www.physics.helsinki.fi/vlasiator/
@@ -20,242 +20,302 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include <algorithm>
-#include <cmath>
-#include <utility>
+#include <dccrg.hpp>
+#include <dccrg_cartesian_geometry.hpp>
+#include <phiprof.hpp>
+#include "../definitions.h"
+
+#include "gpu_acc_semilag.hpp"
+#include "cpu_acc_intersections.hpp"
+#include "gpu_acc_map.hpp"
+#include "../spatial_cells/block_adjust_gpu.hpp"
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-#include <Eigen/Geometry>
-#include <Eigen/Core>
-
-#include "cpu_acc_transform.hpp"
-#include "cpu_acc_intersections.hpp"
-#include "gpu_acc_semilag.hpp"
-#include "gpu_acc_map.hpp"
-
-#include "../arch/gpu_base.hpp"
-
-#include "../velocity_mesh_parameters.h"
-
-using namespace std;
-using namespace spatial_cell;
-using namespace Eigen;
-
 /*!
-  prepareAccelerateCell and getAccelerationSybcycles available only through
-  cpu_acc_semilag.cpp
-*/
-
-/*!
-  Propagates the distribution function in velocity space of given real
-  space cell.
-
-  This version prepares the transformation matrix and calculates intersections
-  on the CPU. After that, the column construction and actual
-  semilagrangian remapping is launched on the GPU.
+  \brief Propagates the distribution function in velocity space of given list of
+  real space cells using a semi-Lagrangian acceleration approach. GPU version.
 
   Based on SLICE-3D algorithm: Zerroukat, M., and T. Allen. "A
   three‐dimensional monotone and conservative semi‐Lagrangian scheme
   (SLICE‐3D) for transport problems." Quarterly Journal of the Royal
   Meteorological Society 138.667 (2012): 1640-1651.
 
- * @param spatial_cell Spatial cell containing the accelerated population.
- * @param popID ID of the accelerated particle species.
- * @param map_order Order in which vx,vy,vz mappings are performed.
- * @param dt Time step of one subcycle.
+  @param mpiGrid DCCRG container of spatial cells
+  @param acceleratedCells vector of cells for which to perform acceleration
+  @param popID ID of the accelerated particle species.
+  @param map_order Order [0,2] in which vx,vy,vz mappings are performed.
 */
 
-__global__ void printVBCsizekernel(
-   // Quick debug kernel
-   //vmesh::VelocityBlockContainer blockContainer
-   const uint popID
+void gpu_accelerate_cells(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
+                          const std::vector<CellID>& acceleratedCells,
+                          const uint popID,
+                          const uint map_order
    ) {
-   //uint blockDataN = blockContainer.size();
-   //Real* parameters = blockContainer.getParameters();
-   // const int gpuBlocks = gridDim.x;
-   // const int blocki = blockIdx.x;
-   const int i = threadIdx.x;
-   const int j = threadIdx.y;
-   const int k = threadIdx.z;
-   const uint ti = k*WID2 + j*WID + i;
-   if (ti==0) {
-      printf("\nDevice printout of velocity mesh %d \n",popID);
-      //vmesh::printVelocityMesh(popID);
-   }
-}
 
-/*!
-  Prepare to accelerate species in cell. Sets the maximum allowed dt to the
-  correct value.
 
- * @param spatial_cell Spatial cell containing the accelerated population.
- * @param popID ID of the accelerated particle species.
-*/
+   phiprof::Timer verificationTimer {"gpu ACC allocation verifications"};
+   const uint nCells = (uint)acceleratedCells.size();
+   gpu_batch_allocate(nCells,0);
+   verificationTimer.stop();
 
-void prepareAccelerateCell(
-   SpatialCell* spatial_cell,
-   const uint popID){
-   updateAccelerationMaxdt(spatial_cell, popID);
-}
+   // Calculate intersections (should be constant cost per cell). Also reduces
+   // the largest found block count in order to ensure allocations.
+   int intersections_id {phiprof::initializeTimer("cell-compute-intersections")};
+   uint gpuMaxBlockCount = 0;
+   #pragma omp parallel
+   {
+      uint threadGpuMaxBlockCount = 0;
+      #pragma omp for schedule(static)
+      for (size_t cellIndex=0; cellIndex<acceleratedCells.size(); ++cellIndex) {
+         const CellID cid = acceleratedCells[cellIndex];
+         SpatialCell* SC = mpiGrid[cid];
+         Population& pop = SC->get_population(popID);
+         compute_cell_intersections(SC, popID, map_order, pop.subcycleDt, intersections_id);
 
-/*!
-  Compute the number of subcycles needed for the acceleration of the particle
-  species in the spatial cell. Note that one should first prepare to
-  accelerate the cell with prepareAccelerateCell.
+         const vmesh::VelocityMesh* vmesh = SC->get_velocity_mesh(popID);
+         const uint blockCount = vmesh->size();
+         threadGpuMaxBlockCount = std::max(threadGpuMaxBlockCount,blockCount);
 
- * @param spatial_cell Spatial cell containing the accelerated population.
- * @param popID ID of the accelerated particle species.
-*/
-
-uint getAccelerationSubcycles(SpatialCell* spatial_cell, Real dt, const uint popID)
-{
-   return max( convert<uint>(ceil(dt / spatial_cell->get_max_v_dt(popID))), 1u);
-}
-
-/*!
-  Propagates the distribution function in velocity space of given real
-  space cell.
-
-  Based on SLICE-3D algorithm: Zerroukat, M., and T. Allen. "A
-  three‐dimensional monotone and conservative semi‐Lagrangian scheme
-  (SLICE‐3D) for transport problems." Quarterly Journal of the Royal
-  Meteorological Society 138.667 (2012): 1640-1651.
-
- * @param spatial_cell Spatial cell containing the accelerated population.
- * @param popID ID of the accelerated particle species.
- * @param vmesh Velocity mesh.
- * @param blockContainer Velocity block data container.
- * @param map_order Order in which vx,vy,vz mappings are performed.
- * @param dt Time step of one subcycle.
-*/
-
-void gpu_accelerate_cell(SpatialCell* spatial_cell,
-                         const uint popID,
-                         const uint map_order,
-                         const Real& dt) {
-   double t1 = MPI_Wtime();
-
-   vmesh::VelocityMesh* vmesh    = spatial_cell->get_velocity_mesh(popID);
-   //vmesh::VelocityBlockContainer* blockContainer = spatial_cell->get_velocity_blocks(popID);
-
-#ifdef _OPENMP
-   const uint thread_id = omp_get_thread_num();
-#else
-   const uint thread_id = 0;
-#endif
-
-   // // GPUTEST Launch debug kernel?
-   //vmesh::getMeshWrapper()->printVelocityMesh(popID);
-   // vmesh::printVelocityMesh(popID);
-   // dim3 block(WID,WID,WID);
-   // printVBCsizekernel<<<1, block, 0, gpu_getStream()>>> (popID);
-   // CHK_ERR( gpuDeviceSynchronize() );
-
-   // compute transform, forward in time and backward in time
-   phiprof::Timer transformTimer {"compute-transform"};
-
-   //compute the transform performed in this acceleration
-   Transform<Real,3,Affine> fwd_transform= compute_acceleration_transformation(spatial_cell,popID,dt);
-   Transform<Real,3,Affine> bwd_transform= fwd_transform.inverse();
-   transformTimer.stop();
-
-   Real intersection_z,intersection_z_di,intersection_z_dj,intersection_z_dk;
-   Real intersection_x,intersection_x_di,intersection_x_dj,intersection_x_dk;
-   Real intersection_y,intersection_y_di,intersection_y_dj,intersection_y_dk;
-
-   switch(map_order){
-      case 0: {
-         phiprof::Timer intersectionsTimer {"compute-intersections"};
-         //Map order XYZ
-         compute_intersections_1st(vmesh,bwd_transform, fwd_transform, 0,
-                                   intersection_x,intersection_x_di,intersection_x_dj,intersection_x_dk);
-         compute_intersections_2nd(vmesh,bwd_transform, fwd_transform, 1,
-                                   intersection_y,intersection_y_di,intersection_y_dj,intersection_y_dk);
-         compute_intersections_3rd(vmesh,bwd_transform, fwd_transform, 2,
-                                   intersection_z,intersection_z_di,intersection_z_dj,intersection_z_dk);
-         intersectionsTimer.stop();
-
-         phiprof::Timer mappingTimer1 {"compute-mapping 1"};
-         gpu_acc_map_1d(spatial_cell, popID,
-                        intersection_x,intersection_x_di,intersection_x_dj,intersection_x_dk,
-                        0, gpuStreamList[thread_id]); // map along x
-         mappingTimer1.stop();
-         phiprof::Timer mappingTimer2 {"compute-mapping 2"};
-         gpu_acc_map_1d(spatial_cell, popID,
-                        intersection_y,intersection_y_di,intersection_y_dj,intersection_y_dk,
-                        1, gpuStreamList[thread_id]); // map along y
-         mappingTimer2.stop();
-         phiprof::Timer mappingTimer3 {"compute-mapping 3"};
-         gpu_acc_map_1d(spatial_cell, popID,
-                        intersection_z,intersection_z_di,intersection_z_dj,intersection_z_dk,
-                        2, gpuStreamList[thread_id]); // map along z
-         mappingTimer3.stop();
-         break;
+         // Store pointers in batch buffers
+         host_vmeshes[cellIndex] = SC->dev_get_velocity_mesh(popID);
+         host_VBCs[cellIndex] = SC->dev_get_velocity_blocks(popID);
+         host_minValues[cellIndex] = SC->getVelocityBlockMinValue(popID);
+         host_vbwcl_vec[cellIndex] = SC->dev_velocity_block_with_content_list;
+         host_lists_with_replace_new[cellIndex] = SC->dev_list_with_replace_new;
+         host_lists_delete[cellIndex] = SC->dev_list_delete;
+         host_lists_to_replace[cellIndex] = SC->dev_list_to_replace;
+         host_lists_with_replace_old[cellIndex] = SC->dev_list_with_replace_old;
+         host_allMaps[2*cellIndex] = SC->dev_velocity_block_with_content_map;
+         host_allMaps[2*cellIndex+1] = SC->dev_velocity_block_with_no_content_map;
       }
-
-      case 1: {
-         phiprof::Timer intersectionsTimer {"compute-intersections"};
-         //Map order YZX
-         compute_intersections_1st(vmesh, bwd_transform, fwd_transform, 1,
-                                   intersection_y,intersection_y_di,intersection_y_dj,intersection_y_dk);
-         compute_intersections_2nd(vmesh, bwd_transform, fwd_transform, 2,
-                                   intersection_z,intersection_z_di,intersection_z_dj,intersection_z_dk);
-         compute_intersections_3rd(vmesh, bwd_transform, fwd_transform, 0,
-                                   intersection_x,intersection_x_di,intersection_x_dj,intersection_x_dk);
-         intersectionsTimer.stop();
-
-         phiprof::Timer mappingTimer1 {"compute-mapping 1"};
-         gpu_acc_map_1d(spatial_cell, popID,
-                        intersection_y,intersection_y_di,intersection_y_dj,intersection_y_dk,
-                        1, gpuStreamList[thread_id]); // map along y
-         mappingTimer1.stop();
-         phiprof::Timer mappingTimer2 {"compute-mapping 2"};
-         gpu_acc_map_1d(spatial_cell, popID,
-                        intersection_z,intersection_z_di,intersection_z_dj,intersection_z_dk,
-                        2, gpuStreamList[thread_id]); // map along z
-         mappingTimer2.stop();
-         phiprof::Timer mappingTimer3 {"compute-mapping 3"};
-         gpu_acc_map_1d(spatial_cell, popID,
-                        intersection_x,intersection_x_di,intersection_x_dj,intersection_x_dk,
-                        0, gpuStreamList[thread_id]); // map along x
-         mappingTimer3.stop();
-         break;
-      }
-
-      case 2: {
-         phiprof::Timer intersectionsTimer {"compute-intersections"};
-         //Map order Z X Y
-         compute_intersections_1st(vmesh, bwd_transform, fwd_transform, 2,
-                                   intersection_z,intersection_z_di,intersection_z_dj,intersection_z_dk);
-         compute_intersections_2nd(vmesh, bwd_transform, fwd_transform, 0,
-                                   intersection_x,intersection_x_di,intersection_x_dj,intersection_x_dk);
-         compute_intersections_3rd(vmesh, bwd_transform, fwd_transform, 1,
-                                   intersection_y,intersection_y_di,intersection_y_dj,intersection_y_dk);
-         intersectionsTimer.stop();
-
-         phiprof::Timer mappingTimer1 {"compute-mapping 1"};
-         gpu_acc_map_1d(spatial_cell, popID,
-                        intersection_z,intersection_z_di,intersection_z_dj,intersection_z_dk,
-                        2, gpuStreamList[thread_id]); // map along z
-         mappingTimer1.stop();
-         phiprof::Timer mappingTimer2 {"compute-mapping 2"};
-         gpu_acc_map_1d(spatial_cell, popID,
-                        intersection_x,intersection_x_di,intersection_x_dj,intersection_x_dk,
-                        0, gpuStreamList[thread_id]); // map along x
-         mappingTimer2.stop();
-         phiprof::Timer mappingTimer3 {"compute-mapping 3"};
-         gpu_acc_map_1d(spatial_cell, popID,
-                        intersection_y,intersection_y_di,intersection_y_dj,intersection_y_dk,
-                        1, gpuStreamList[thread_id]); // map along y
-         mappingTimer3.stop();
-         break;
+      #pragma omp critical
+      {
+         gpuMaxBlockCount = std::max(gpuMaxBlockCount,threadGpuMaxBlockCount);
       }
    }
 
-   //if (Parameters::prepareForRebalance == true) {
-   //    spatial_cell->parameters[CellParams::LBWEIGHTCOUNTER] += (MPI_Wtime() - t1);
-   //}
+   // Ensure accelerator has enough temporary memory allocated
+   verificationTimer.start();
+   gpu_vlasov_allocate(gpuMaxBlockCount,nCells);
+   gpu_acc_allocate(gpuMaxBlockCount,nCells);
+   verificationTimer.stop();
+
+   // Copy pointers and counters over to device
+   phiprof::Timer copyTimer {"copy pointer addresses to device"};
+   CHK_ERR( gpuMemset(dev_nBefore, 0, nCells*sizeof(vmesh::LocalID)) );
+   CHK_ERR( gpuMemset(dev_nAfter, 0, nCells*sizeof(vmesh::LocalID)) );
+   CHK_ERR( gpuMemset(dev_nBlocksToChange, 0, nCells*sizeof(vmesh::LocalID)) );
+   CHK_ERR( gpuMemset(dev_resizeSuccess, 0, nCells*sizeof(vmesh::LocalID)) );
+
+   CHK_ERR( gpuMemcpy(dev_allMaps, host_allMaps, 2*nCells*sizeof(Hashinator::Hashmap<vmesh::GlobalID,vmesh::LocalID>*), gpuMemcpyHostToDevice) );
+   CHK_ERR( gpuMemcpy(dev_vmeshes, host_vmeshes, nCells*sizeof(vmesh::VelocityMesh*), gpuMemcpyHostToDevice) );
+   CHK_ERR( gpuMemcpy(dev_minValues, host_minValues, nCells*sizeof(Real), gpuMemcpyHostToDevice) );
+   CHK_ERR( gpuMemcpy(dev_vbwcl_vec, host_vbwcl_vec, nCells*sizeof(split::SplitVector<vmesh::GlobalID>*), gpuMemcpyHostToDevice) );
+   CHK_ERR( gpuMemcpy(dev_lists_with_replace_new, host_lists_with_replace_new, nCells*sizeof(split::SplitVector<vmesh::GlobalID>*), gpuMemcpyHostToDevice) );
+   CHK_ERR( gpuMemcpy(dev_lists_delete, host_lists_delete, nCells*sizeof(split::SplitVector<Hashinator::hash_pair<vmesh::GlobalID,vmesh::LocalID>>*), gpuMemcpyHostToDevice) );
+   CHK_ERR( gpuMemcpy(dev_lists_to_replace, host_lists_to_replace, nCells*sizeof(split::SplitVector<Hashinator::hash_pair<vmesh::GlobalID,vmesh::LocalID>>*), gpuMemcpyHostToDevice) );
+   CHK_ERR( gpuMemcpy(dev_lists_with_replace_old, host_lists_with_replace_old, nCells*sizeof(split::SplitVector<Hashinator::hash_pair<vmesh::GlobalID,vmesh::LocalID>>*), gpuMemcpyHostToDevice) );
+   CHK_ERR( gpuMemcpy(dev_VBCs, host_VBCs, nCells*sizeof(vmesh::VelocityBlockContainer*), gpuMemcpyHostToDevice) );
+   copyTimer.stop();
+
+   // Do some overall preparation regarding dimensions and acceleration order
+   const uint D0 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[0];
+   const uint D1 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[1];
+   const uint D2 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[2];
+
+   std::vector<int> dimOrder(3);
+   switch(map_order) {
+      case 0: { //Map order XYZ
+         dimOrder={0,1,2};
+         break;
+      }
+      case 1: { //Map order YZX
+         dimOrder={1,2,0};
+         break;
+      }
+      case 2: { //Map order ZXY
+         dimOrder={2,0,1};
+         break;
+      }
+      default:
+         std::cerr<<"ERROR! Incorrect map_order "<<map_order<<"!"<<std::endl;
+         abort();
+   }
+
+   /**
+      Loop over three velocity dimensions, based on map_order,
+      and accelerate all cells for that dimension.
+   */
+   for (int dimIndex = 0; dimIndex<3; ++dimIndex) {
+      int dimension = dimOrder[dimIndex];
+      
+      string profName = "accelerate "+getObjectWrapper().particleSpecies[popID].name;
+      phiprof::Timer accTimer {profName};
+
+      // used when computing id of target block.
+      uint block_indices_to_id[3] = {0, 0, 0};
+      uint block_indices_to_probe[3] = {0, 0, 0};
+      uint cell_indices_to_id[3] = {0, 0, 0};
+
+      // Find probe cube extents as well
+      int Dacc=0, Dother=0;
+
+      switch (dimension) {
+         case 0: /* i and k coordinates have been swapped */
+            /* set values in array that is used to convert block indices to id using a dot product */
+            block_indices_to_id[0] = D0*D1;
+            block_indices_to_id[1] = D0;
+            block_indices_to_id[2] = 1;
+
+            /* set values in array that is used to convert block indices to position in probe cube
+               propagate along X, flatten Y+Z */
+            block_indices_to_probe[0] = D1*D2;
+            block_indices_to_probe[1] = D2;
+            block_indices_to_probe[2] = 1;
+            Dacc = D0;
+            Dother = D1*D2;
+
+            /* set values in array that is used to convert block indices to id using a dot product */
+            cell_indices_to_id[0] = WID2;
+            cell_indices_to_id[1] = WID;
+            cell_indices_to_id[2] = 1;
+            break;
+         case 1: /* j and k coordinates have been swapped */
+            /* set values in array that is used to convert block indices to id using a dot product */
+            block_indices_to_id[0] = 1;
+            block_indices_to_id[1] = D0*D1;
+            block_indices_to_id[2] = D0;
+
+            /* set values in array that is used to convert block indices to position in probe cube
+               propagate along Y, flatten X+Z */
+            block_indices_to_probe[0] = D2;
+            block_indices_to_probe[1] = D0*D2;
+            block_indices_to_probe[2] = 1;
+            Dacc = D1;
+            Dother = D0*D2;
+
+            /* set values in array that is used to convert block indices to id using a dot product */
+            cell_indices_to_id[0] = 1;
+            cell_indices_to_id[1] = WID2;
+            cell_indices_to_id[2] = WID;
+            break;
+         case 2:
+            /* set values in array that is used to convert block indices to id using a dot product */
+            block_indices_to_id[0] = 1;
+            block_indices_to_id[1] = D0;
+            block_indices_to_id[2] = D0*D1;
+
+            /* set values in array that is used to convert block indices to position in probe cube
+               propagate along Z, flatten X+Y */
+            block_indices_to_probe[0] = D1;
+            block_indices_to_probe[1] = 1;
+            block_indices_to_probe[2] = D0*D1;
+            Dacc = D2;
+            Dother = D0*D1;
+
+            /* set values in array that is used to convert block indices to id using a dot product. */
+            cell_indices_to_id[0] = 1;
+            cell_indices_to_id[1] = WID;
+            cell_indices_to_id[2] = WID2;
+            break;
+         default:
+            std::cerr<<"Invalid dimension "<<dimension<<"!"<<std::endl;
+            abort();
+      }
+
+      // Copy indexing information to device. To be tested: might be faster to pass a single
+      // device-side struct or just 9 plain arguments?
+      CHK_ERR( gpuMemcpy(gpu_cell_indices_to_id, cell_indices_to_id, 3*sizeof(uint), gpuMemcpyHostToDevice) );
+      CHK_ERR( gpuMemcpy(gpu_block_indices_to_id, block_indices_to_id, 3*sizeof(uint), gpuMemcpyHostToDevice) );
+      CHK_ERR( gpuMemcpy(gpu_block_indices_to_probe, block_indices_to_probe, 3*sizeof(uint), gpuMemcpyHostToDevice) );
+
+      // Select correct intersections for each mapping order
+      #pragma omp parallel for
+      for (size_t cellIndex=0; cellIndex<acceleratedCells.size(); ++cellIndex) {
+         const CellID cellID = acceleratedCells[cellIndex];
+         Population& pop = mpiGrid[cellID]->get_population(popID);
+         // Place intersections into array so that propagation direction is k-coordinate ("z")
+         switch (dimension) {
+            case 0:
+               // X: swap intersection i and k coordinates
+               host_intersections[cellIndex*4+0]=(Realf)pop.intersection_x;
+               host_intersections[cellIndex*4+1]=(Realf)pop.intersection_x_dk;
+               host_intersections[cellIndex*4+2]=(Realf)pop.intersection_x_dj;
+               host_intersections[cellIndex*4+3]=(Realf)pop.intersection_x_di;
+               break;
+            case 1:
+               // Y: swap intersection j and k coordinates
+               host_intersections[cellIndex*4+0]=(Realf)pop.intersection_y;
+               host_intersections[cellIndex*4+1]=(Realf)pop.intersection_y_di;
+               host_intersections[cellIndex*4+2]=(Realf)pop.intersection_y_dk;
+               host_intersections[cellIndex*4+3]=(Realf)pop.intersection_y_dj;
+               break;
+            case 2:
+               // Z: k remains propagation coordinate, no swaps
+               host_intersections[cellIndex*4+0]=(Realf)pop.intersection_z;
+               host_intersections[cellIndex*4+1]=(Realf)pop.intersection_z_di;
+               host_intersections[cellIndex*4+2]=(Realf)pop.intersection_z_dj;
+               host_intersections[cellIndex*4+3]=(Realf)pop.intersection_z_dk;
+               break;
+            default:
+               std::cerr<<"Invalid dimension "<<dimension<<"!"<<std::endl;
+               abort();
+         }
+      }
+      // Send intersection data to device
+      CHK_ERR( gpuMemcpy(dev_intersections, host_intersections, 4*nCells*sizeof(Realf), gpuMemcpyHostToDevice) );
+
+      // Call acceleration solver in chunks, the size of which is determined by the GPU
+      // Vlasov allocation number.
+      const uint maxChunkSize = gpu_getAllocationCount();
+
+      uint queuedCells = 0;
+      uint checkedCells = 0;
+      size_t cumulativeOffset = 0;
+      uint chunk = 0;
+      std::vector<CellID> launchCells;
+
+      for (size_t cellIndex=0; cellIndex<nCells; ++cellIndex) {
+         CellID cid = acceleratedCells[cellIndex];
+         SpatialCell* SC = mpiGrid[cid];
+         const uint blockCount = SC->get_velocity_mesh(popID)->size();
+         SC->setReservation(popID, blockCount);
+         SC->applyReservation(popID);
+
+         if (blockCount > 0) {
+            // Only accelerate non-empty cells
+            launchCells.push_back(cid);
+            queuedCells++;
+         }
+         // Keep track of all checked cells for cumulative offset into pointer buffers
+         checkedCells++;
+
+         // Phiprof timer
+         string timerName = "semilag-acc-dim"+std::to_string(dimension)+"-chunk";
+         //timerName += "-"+std::to_string(chunk); // Optional: phiprof label for chunk id
+         phiprof::Timer accChunkTimer {timerName};
+
+         // Once enough cells have been gathered into the chunk, or we have evaluated
+         // the last of potential cells, Launch the acceleration solver for this chunk.
+         // Will not launch if no cells to be accelerated are left.
+         if (queuedCells == maxChunkSize || ( (cellIndex==nCells-1) && (queuedCells > 0) )) {
+            gpu_acc_map_1d(mpiGrid,
+                           launchCells,
+                           popID,
+                           dimension,
+                           Dacc,
+                           Dother,
+                           cumulativeOffset
+               );
+            cumulativeOffset += checkedCells;
+            queuedCells = 0;
+            checkedCells = 0;
+            chunk++;
+            launchCells.clear();
+         }
+      }
+   }
 }

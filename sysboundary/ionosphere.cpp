@@ -184,7 +184,7 @@ namespace SBC {
          elements.push_back(newElement);
       }
 
-      // Linke elements to nodes
+      // Link elements to nodes
       updateConnectivity();
    }
 
@@ -1221,6 +1221,9 @@ namespace SBC {
             }
          } else if(ionizationModel == Juusola2025) {
 
+            const static int NODE_CONSTRAINT_REDUCTION = 1;
+            const static int ELEMENT_CONSTRAINT_REDUCTION =1;
+
             // Ionosoheric Sigma calculation function coefficients from
             // Juusola et al. 2025
             // Note: MLT is in hours
@@ -1558,10 +1561,18 @@ namespace SBC {
                edgeJCurl[e] = vJ[e];
             }
 
+            // Now, likewise interpolate edge-localized J_DF to elements
+            for(uint el=0; el<elements.size(); el++) {
+               // Effective curl-free current in this element
+               Eigen::Vector3d j_df = whitneyInterpolate(el, edgeJCurl);
+
+               elementDivFreeCurrent[el] = j_df;
+            }
+
             // Next, evaluate Sigma as a function of inplane-J and MLT
             #pragma omp parallel for
             for(uint n=0; n < nodes.size(); n++) {
-               Eigen::Vector3d J(0,0,0);
+               Eigen::Vector3d J=interpolateEdgeToNode(n, edgeJCurl);
                Eigen::Vector3d x(nodes[n].x.data());
 
                Real totalA=0;
@@ -4363,8 +4374,8 @@ namespace SBC {
          // let's get rid of blocks not fulfilling the criteria here to save memory.
          mpiGrid[cellID]->adjustSingleCellVelocityBlocks(popID,true);
 
-         // TODO: The moments can also be analytically calculated from ionosphere parameters.
-         // Maybe that's faster?
+         // In principle this could call _R or _V instead according to calculate_V_moments (unused at the moment)
+         // But the relevant moments will get recomputed in other spots when needed.
          calculateCellMoments(mpiGrid[cellID], true, false, true);
       } // End of if for coupling interval, we skip this altogether
 
