@@ -38,6 +38,11 @@
 
 // #define MAXCPUTHREADS 64 now in gpu_base.hpp
 
+// Device properties
+int gpuMultiProcessorCount = 0;
+int blocksPerMP = 0;
+int threadsPerMP = 0;
+
 extern Logger logFile;
 int myDevice;
 int myRank;
@@ -61,6 +66,8 @@ uint *gpu_block_indices_to_probe;
 // Pointers to buffers used in acceleration
 ColumnOffsets *host_columnOffsetData = NULL, *dev_columnOffsetData = NULL;
 Realf **host_blockDataOrdered = NULL, **dev_blockDataOrdered = NULL;
+// Counts used in acceleration
+size_t gpu_probeFullSize = 0, gpu_probeFlattenedSize = 0;
 
 // Hash map and splitvectors buffers used in batch operations (block adjustment, acceleration)
 vmesh::VelocityMesh** host_vmeshes, **dev_vmeshes;
@@ -96,6 +103,7 @@ Hashinator::Hashmap<vmesh::GlobalID,vmesh::LocalID> *unionOfBlocksSet=NULL, *dev
 // pointers for translation
 Realf** dev_pencilBlockData; // Array of pointers into actual block data
 uint* dev_pencilBlocksCount; // Array of counters if pencil needs to be propagated for this block or not
+GPUMemoryManager gpuMemoryManager;
 
 // Counter for how many parallel vlasov buffers are allocated
 uint allocationCount = 0;
@@ -121,9 +129,9 @@ Realf *host_sparsity = nullptr, *dev_densityPreAdjust = nullptr, *dev_densityPos
 size_t *host_cellIdxStartCutoff = nullptr, *host_smallCellIdxArray = nullptr, *host_remappedCellIdxArray = nullptr; // remappedCellIdxArray tells the position of the cell index in the sequence instead of the actual index
 // Device pointers
 Real *dev_bValues = nullptr, *dev_nu0Values = nullptr, *dev_bulkVX = nullptr, *dev_bulkVY = nullptr, *dev_bulkVZ = nullptr,
-   *dev_Ddt = nullptr, *dev_potentialDdtValues = nullptr, *dev_out_values = nullptr;
+   *dev_Ddt = nullptr, *dev_potentialDdtValues = nullptr;
 Realf *dev_fmu = nullptr, *dev_dfdt_mu = nullptr, *dev_sparsity = nullptr;
-int *dev_fcount = nullptr, *dev_cellIdxKeys = nullptr, *dev_out_keys = nullptr;
+int *dev_fcount = nullptr, *dev_cellIdxKeys = nullptr;
 size_t *dev_smallCellIdxArray = nullptr, *dev_remappedCellIdxArray = nullptr, *dev_cellIdxStartCutoff = nullptr, *dev_cellIdxArray = nullptr, *dev_velocityIdxArray = nullptr;
 // Counters
 size_t latestNumberOfLocalCellsPitchAngle = 0;
@@ -143,6 +151,17 @@ __host__ uint gpu_getMaxThreads() {
 #else
    return 1;
 #endif
+}
+
+unsigned int nextPowerOfTwo(unsigned int n) {
+   if (n == 0) return 1;
+   n--; // Handle exact powers of two
+   n |= n >> 1;
+   n |= n >> 2;
+   n |= n >> 4;
+   n |= n >> 8;
+   n |= n >> 16;
+   return n + 1;
 }
 
 __host__ void gpu_init_device() {
@@ -185,31 +204,37 @@ __host__ void gpu_init_device() {
    myRank = amps_rank;
 
    // if only one visible device, assume MPI system handles device visibility and just use the only visible one.
-   if (deviceCount > 1) {
-      // Otherwise, try selecting the correct one.
-      if (amps_node_rank >= deviceCount) {
-         std::cerr<<"Error, attempting to use GPU device beyond available count!"<<std::endl;
-         abort();
-      }
-      if (amps_node_size > deviceCount) {
-         std::cerr<<"Error, MPI tasks per node exceeds available GPU device count!"<<std::endl;
-         abort();
-      }
-      CHK_ERR( gpuSetDevice(amps_node_rank) );
-      // Only printout for first node:
-      if (amps_rank < amps_node_size) {
-         stringstream printout;
-         printout << "(Node 0) rank " << amps_rank << " is noderank "<< amps_node_rank << " of ";
-         printout << amps_node_size << " with " << deviceCount << " visible GPU devices." << std::endl;
-         std::cout << printout.str();
-      }
-   } else {
-      if (amps_rank == MASTER_RANK) {
+   if (amps_rank == MASTER_RANK) {
+      if (deviceCount > 1) {
+         // If more than one device is visible, issue warning to user along with suggestion to use SLURM options.
+         std::cout << "(Node 0) WARNING! MPI ranks see "<<deviceCount<<" GPU devices each." << std::endl;
+         std::cout << "         Recommended usage is to utilize SLURM for showing only single GPU device per MPI rank:" << std::endl;
+         std::cout << "         export CUDA_VISIBLE_DEVICES=\\$SLURM_LOCALID" << std::endl;
+         std::cout << "         or" << std::endl;
+         std::cout << "         export ROCR_VISIBLE_DEVICES=\\$SLURM_LOCALID" << std::endl;
+      } else {
          std::cout << "(Node 0) MPI ranks see single GPU device each." << std::endl;
       }
    }
    CHK_ERR( gpuDeviceSynchronize() );
    CHK_ERR( gpuGetDevice(&myDevice) );
+
+   // Decide on number of allocations to prepare
+   const uint nBaseCells = P::xcells_ini * P::ycells_ini * P::zcells_ini;
+   allocationCount = (nBaseCells == 1) ? 1 : P::GPUallocations;
+
+   // Get device properties
+   gpuDeviceProp prop;
+   CHK_ERR( gpuGetDeviceProperties(&prop, myDevice) );
+   gpuMultiProcessorCount = prop.multiProcessorCount;
+   threadsPerMP = prop.maxThreadsPerMultiProcessor;
+   #if defined(USE_GPU) && defined(__CUDACC__)
+   CHK_ERR( gpuDeviceGetAttribute(&blocksPerMP, gpuDevAttrMaxBlocksPerMultiprocessor, myDevice) );
+   #endif
+   #if defined(USE_GPU) && defined(__HIP_PLATFORM_HCC___)
+   blocksPerMP = threadsPerMP/GPUTHREADS; // This should be the maximum number of wavefronts per CU
+   #endif
+
 
    // Query device capabilities (only for CUDA, not needed for HIP)
    #if defined(USE_GPU) && defined(__CUDACC__)
@@ -272,6 +297,7 @@ __host__ void gpu_clear_device() {
    CHK_ERR( gpuFree(gpu_block_indices_to_id) );
    CHK_ERR( gpuFree(gpu_block_indices_to_probe) );
    CHK_ERR( gpuDeviceSynchronize() );
+   gpuMemoryManager.freeAll();
 }
 
 __host__ gpuStream_t gpu_getStream() {
@@ -399,18 +425,32 @@ int gpu_reportMemory(const size_t local_cells_capacity, const size_t ghost_cells
    This is called from within non-threaded regions so does not perform async.
  */
 __host__ void gpu_vlasov_allocate(
-   const uint maxBlockCount, // Largest found vmesh size
-   const uint nCells // number of spatial cells
+   const uint maxBlockCount // Largest found vmesh size
    ) {
    // Always prepare for at least VLASOV_BUFFER_MINBLOCKS blocks
    const uint maxBlocksPerCell = max(VLASOV_BUFFER_MINBLOCKS, maxBlockCount);
-   allocationCount = (nCells == 1) ? 1 : P::GPUallocations;
    if (host_blockDataOrdered == NULL) {
       CHK_ERR( gpuMallocHost((void**)&host_blockDataOrdered,allocationCount*sizeof(Realf*)) );
    }
    if (dev_blockDataOrdered == NULL) {
       CHK_ERR( gpuMalloc((void**)&dev_blockDataOrdered,allocationCount*sizeof(Realf*)) );
    }
+   // Evaluate required size for acceleration probe cube (based on largest population)
+   for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
+      const uint c0 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[0];
+      const uint c1 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[1];
+      const uint c2 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[2];
+      std::array<uint, 3> s = {c0,c1,c2};
+      std::sort(s.begin(), s.end());
+      // Round values up to nearest 2*Hashinator::defaults::MAX_BLOCKSIZE
+      size_t probeCubeExtentsFull = s[0]*s[1]*s[2];
+      probeCubeExtentsFull = 2*Hashinator::defaults::MAX_BLOCKSIZE * (1 + ((probeCubeExtentsFull - 1) / (2*Hashinator::defaults::MAX_BLOCKSIZE)));
+      gpu_probeFullSize = std::max(gpu_probeFullSize,probeCubeExtentsFull);
+      size_t probeCubeExtentsFlat = s[1]*s[2];
+      probeCubeExtentsFlat = 2*Hashinator::defaults::MAX_BLOCKSIZE * (1 + ((probeCubeExtentsFlat - 1) / (2*Hashinator::defaults::MAX_BLOCKSIZE)));
+      gpu_probeFlattenedSize = std::max(gpu_probeFlattenedSize,probeCubeExtentsFlat);
+   }
+   // per-buffer allocations
    for (uint i=0; i<allocationCount; ++i) {
       gpu_vlasov_allocate_perthread(i, maxBlocksPerCell);
    }
@@ -445,7 +485,9 @@ __host__ void gpu_vlasov_allocate_perthread(
    uint blockAllocationCount
    ) {
    // Check if we already have allocated enough memory?
-   if (gpu_vlasov_allocatedSize[allocID] > blockAllocationCount * BLOCK_ALLOCATION_FACTOR) {
+   const size_t probeRequirement = sizeof(vmesh::LocalID)*gpu_probeFullSize + gpu_probeFlattenedSize*GPU_PROBEFLAT_N*sizeof(vmesh::LocalID);
+   if ( (gpu_vlasov_allocatedSize[allocID] > blockAllocationCount * BLOCK_ALLOCATION_FACTOR) &&
+        (gpu_vlasov_allocatedSize[allocID]*WID3*sizeof(Realf) >= probeRequirement) ) {
       return;
    }
    // Potential new allocation with extra padding (including translation multiplier - GPUTODO get rid of this)
@@ -458,17 +500,7 @@ __host__ void gpu_vlasov_allocate_perthread(
    // Calculate required size
    size_t blockDataAllocation = newSize * WID3 * sizeof(Realf);
    // minimum allocation size:
-   for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
-      const uint c0 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[0];
-      const uint c1 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[1];
-      const uint c2 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[2];
-      std::array<uint, 3> s = {c0,c1,c2};
-      std::sort(s.begin(), s.end());
-      const size_t probeCubeExtentsFull = s[0]*s[1]*s[2];
-      size_t probeCubeExtentsFlat = s[1]*s[2];
-      probeCubeExtentsFlat = 2*Hashinator::defaults::MAX_BLOCKSIZE * (1 + ((probeCubeExtentsFlat - 1) / (2*Hashinator::defaults::MAX_BLOCKSIZE)));
-      blockDataAllocation = std::max(blockDataAllocation,probeCubeExtentsFull*sizeof(vmesh::LocalID) + probeCubeExtentsFlat*GPU_PROBEFLAT_N*sizeof(vmesh::LocalID));
-   }
+   blockDataAllocation = std::max(blockDataAllocation,probeRequirement);
    /*
      CUDA C Programming Guide
      6.3.2. Device Memory Accesses (June 2025)
@@ -612,16 +644,13 @@ __host__ void gpu_batch_deallocate(bool first, bool second) {
    This is called from within non-threaded regions so does not perform async.
  */
 __host__ void gpu_acc_allocate(
-   uint maxBlockCount,
-   const uint nCells // number of spatial cells
+   uint maxBlockCount
    ) {
-   allocationCount = (nCells == 1) ? 1 : P::GPUallocations;
    if (host_columnOffsetData == NULL) {
       // This would be preferable as would use pinned memory but fails on exit
       void *buf;
       CHK_ERR( gpuMallocHost((void**)&buf,allocationCount*sizeof(ColumnOffsets)) );
       host_columnOffsetData = new (buf) ColumnOffsets[allocationCount];
-      // host_columnOffsetData = new ColumnOffsets[allocationCount];
    }
    if (dev_columnOffsetData == NULL) {
       CHK_ERR( gpuMalloc((void**)&dev_columnOffsetData,allocationCount*sizeof(ColumnOffsets)) );
@@ -701,7 +730,6 @@ __host__ void gpu_trans_allocate(
    if (nAllCells > 0) {
       // Use batch allocation
       gpu_batch_allocate(nAllCells);
-      allocationCount = (nAllCells == 1) ? 1 : P::GPUallocations;
    }
    // Vectors with one entry per pencil cell (prefetch to host)
    if (sumOfLengths > 0) {
@@ -891,8 +919,6 @@ void gpu_pitch_angle_diffusion_allocate(size_t numberOfLocalCells, int nbins_v, 
    CHK_ERR( gpuMalloc((void**)&dev_Ddt, numberOfLocalCells*sizeof(Real)) );
    CHK_ERR( gpuMalloc((void**)&dev_potentialDdtValues, numberOfLocalCells*blocksPerSpatialCell*sizeof(Real)) );
    CHK_ERR( gpuMalloc((void**)&dev_cellIdxKeys, numberOfLocalCells*blocksPerSpatialCell*sizeof(int)) );
-   CHK_ERR( gpuMalloc((void**)&dev_out_keys, numberOfLocalCells * sizeof(int)) );
-   CHK_ERR( gpuMalloc((void**)&dev_out_values, numberOfLocalCells * sizeof(Real)) );
 
    memoryHasBeenAllocatedPitchAngle = true;
 }
@@ -949,12 +975,6 @@ void gpu_pitch_angle_diffusion_deallocate() {
    }
    if (dev_cellIdxKeys) {
       CHK_ERR( gpuFree(dev_cellIdxKeys) );
-   }
-   if (dev_out_keys) {
-      CHK_ERR( gpuFree(dev_out_keys) );
-   }
-   if (dev_out_values) {
-      CHK_ERR( gpuFree(dev_out_values) );
    }
    if (host_bValues) {
       CHK_ERR( gpuFreeHost(host_bValues) );
