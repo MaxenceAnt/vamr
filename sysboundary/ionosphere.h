@@ -82,7 +82,8 @@ namespace SBC {
 
       };
       std::vector<Element> elements;
-
+      std::vector<Eigen::Vector3d> elementCurlFreeCurrent;
+      std::vector<Eigen::Vector3d> elementDivFreeCurrent;
       // One grid node
       struct Node {
          // Elements touching this node
