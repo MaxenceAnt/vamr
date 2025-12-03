@@ -1580,6 +1580,20 @@ namespace SBC {
 
             // Solve divergence-free system
             vJ = solver.solve(vRHS1);
+            for(uint el=0; el<elements.size(); el++) {
+               std::array<uint32_t, 3>& corners = elements[el].corners;
+               Real A = elementArea(el);
+
+               Eigen::Vector3d r0(nodes[corners[0]].x.data());
+               Eigen::Vector3d r1(nodes[corners[1]].x.data());
+               Eigen::Vector3d r2(nodes[corners[2]].x.data());
+
+               Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
+
+               Eigen::Vector3d rotatedVJ = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), barycentre.normalized()).toRotationMatrix() * Eigen::Vector3d(vJ[2*el], vJ[2*el+1], 0);
+               elementDivFreeCurrent[el] = rotatedVJ;
+            }
+
             // Next, evaluate Sigma as a function of inplane-J and MLT
             #pragma omp parallel for
             for(uint n=0; n < nodes.size(); n++) {
@@ -2013,7 +2027,7 @@ namespace SBC {
                      }
                   }
                }
-
+            }
          } else {
             // The other (atmospheric precipitation and height-integration-based) models
             // share most of their code
