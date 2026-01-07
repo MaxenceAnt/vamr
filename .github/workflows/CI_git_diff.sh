@@ -19,6 +19,6 @@ do
   allowed_count=$(( $allowed_count + $diff ))
 done
 if [[ $allowed_count == $full_count ]]; then
-  echo "run_test"
+  echo "no_test"
 fi
 

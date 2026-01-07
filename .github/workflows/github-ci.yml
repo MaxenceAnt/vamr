@@ -30,7 +30,7 @@ jobs:
           cd $GITHUB_WORKSPACE
           #chmod +x ./.github/workflows/CI_git_diff.sh
           echo Comparing PR branch against ${{ github.base_ref }}
-          if [[ $(./.github/workflows/CI_git_diff.sh ${{ github.base_ref }} ) = "run_test" ]]; then
+          if [[ $(./.github/workflows/CI_git_diff.sh ${{ github.base_ref }} ) = "no_test" ]]; then
             echo "RUN_TP=False" >> $GITHUB_OUTPUT
           fi
   get_git_diff_check:
