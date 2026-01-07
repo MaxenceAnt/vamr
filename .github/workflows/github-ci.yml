@@ -32,7 +32,10 @@ jobs:
           echo Comparing PR branch against ${{ github.base_ref }}
           if [[ $(./.github/workflows/CI_git_diff.sh ${{ github.base_ref }} ) = "no_test" ]]; then
             echo "RUN_TP=False" >> $GITHUB_OUTPUT
+            echo "Not running testpackage"
+            exit 0
           fi
+          echo "Running testpackage"
   get_git_diff_check:
     runs-on: ubuntu-latest
     needs: get_git_diff
