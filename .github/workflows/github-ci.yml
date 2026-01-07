@@ -29,7 +29,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE
           #chmod +x ./.github/workflows/CI_git_diff.sh
-          if [[ $(./.github/workflows/CI_git_diff.sh) = "run_test" ]]; then
+          if [[ $(./.github/workflows/CI_git_diff.sh ${{ github.ref }} ) = "run_test" ]]; then
             echo "RUN_TP=False" >> $GITHUB_OUTPUT
           fi
   get_git_diff_check:
