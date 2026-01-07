@@ -1,7 +1,6 @@
 
 #!/bin/bash 
-echo $@
-git_diff=$(git diff --name-only origin/dev...)
+git_diff=$(git diff --name-only origin/$@...)
 declare -i full_count=$(echo $git_diff | wc -w)
 declare -a unallowed_strings=(".cpp\b" ".hpp\b" ".c\b" ".sh\b" )
 for unallowed_string in ${unallowed_strings[@]}
