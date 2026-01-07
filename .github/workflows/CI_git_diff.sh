@@ -3,6 +3,8 @@
 git_diff=$(git diff --name-only origin/$@...)
 declare -i full_count=$(echo $git_diff | wc -w)
 declare -a unallowed_strings=(".cpp\b" ".hpp\b" ".c\b" ".sh\b" )
+
+#Check if git diff contains any changes to the actual code
 for unallowed_string in ${unallowed_strings[@]}
 do
   if [[ $(echo $git_diff | grep -Po $unallowed_string) ]]; then
@@ -13,6 +15,7 @@ done
 declare -a file_check=("\w+.md" "INSTALL" "CITATION.cff" "Doxyfile." "\bdoc/")
 declare -i allowed_count=0
 
+#checking if only allowed files are changed. 
 for allowed_string in ${file_check[@]}
 do
   diff="$(echo $git_diff | grep -Po $allowed_string | wc -w)"

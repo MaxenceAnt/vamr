@@ -43,7 +43,7 @@ jobs:
     steps:
       - name: Checking whether to run tests
         run: |
-          echo "Running testpackage test runs"
+          echo "Running testpackage"
 
 
   build_libraries:
