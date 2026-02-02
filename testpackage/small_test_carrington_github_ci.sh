@@ -7,7 +7,7 @@
 #SBATCH --nodes=1
 #SBATCH -c 4                 # CPU cores per task
 #SBATCH -n 16                  # number of tasks
-#SBATCH --mem-per-cpu=5G
+##SBATCH --mem-per-cpu=5G
 ##SBATCH -x carrington-[801-808]
 
 # If 1, the reference vlsv files are generated
