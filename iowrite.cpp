@@ -643,24 +643,20 @@ bool writeDomainSizes( Writer & vlsvWriter,
 
 bool writeDomainExtents(Writer& vlsvWriter, const string& meshName, const std::vector<CellID>& local_cells,
                         dccrg::Dccrg<SpatialCell, dccrg::Cartesian_Geometry>& mpiGrid) {
-   // Declare domainSize. There are two types of domain sizes -- ghost and local
    vector<CellID>::const_iterator it;
 
    // Write the array:
    map<string, string> xmlAttributes;
    // Put the meshName
    xmlAttributes["mesh"] = meshName;
-
-   SpatialCell& firstCell = *mpiGrid[*local_cells.begin()]; // Add some error for case where doesnt exist?
+   //Get the first cell in domain as a base for comparing against
+   SpatialCell& firstCell = *mpiGrid[*local_cells.begin()]; 
    Real ret[6] = {
-       firstCell.parameters[CellParams::XCRD],
-       firstCell.parameters[CellParams::XCRD] + firstCell.parameters[CellParams::DX],
-       firstCell.parameters[CellParams::YCRD],
-       firstCell.parameters[CellParams::YCRD] + firstCell.parameters[CellParams::DY],
-       firstCell.parameters[CellParams::ZCRD],
-       firstCell.parameters[CellParams::ZCRD] + firstCell.parameters[CellParams::DZ],
+       firstCell.parameters[CellParams::XCRD], firstCell.parameters[CellParams::XCRD] + firstCell.parameters[CellParams::DX],
+       firstCell.parameters[CellParams::YCRD], firstCell.parameters[CellParams::YCRD] + firstCell.parameters[CellParams::DY],
+       firstCell.parameters[CellParams::ZCRD], firstCell.parameters[CellParams::ZCRD] + firstCell.parameters[CellParams::DZ],
    };
-
+   //Loop through the domain cells and find a box that bounds all the cells
    for (it = local_cells.begin() + 1; it != local_cells.end(); it++) {
       CellID cellId = *it;
 
@@ -671,8 +667,10 @@ bool writeDomainExtents(Writer& vlsvWriter, const string& meshName, const std::v
           cell.parameters[CellParams::ZCRD], cell.parameters[CellParams::ZCRD] + cell.parameters[CellParams::DZ],
       };
       for (uint8_t i = 0; i != 6; i++) {
+         //min
          if ((lowcorner[i] < ret[i]) && (i % 2 == 0)) {
             ret[i] = lowcorner[i];
+         //max
          } else if ((lowcorner[i] > ret[i]) && (i % 2 != 0)) {
             ret[i] = lowcorner[i];
          }
@@ -681,7 +679,7 @@ bool writeDomainExtents(Writer& vlsvWriter, const string& meshName, const std::v
    const unsigned int arraySize = 1;
    const unsigned int vectorSize = 6;
 
-   // Write the mesh extents
+   // Write the mesh extents, ret corresponds to [xmin,xmax,ymin,ymax,zmin,zmax] 
    if (vlsvWriter.writeArray("MESH_DOMAIN_EXTENTS",xmlAttributes,arraySize,vectorSize,ret) == false){
        cerr << "Error at: " << __FILE__ << " " << __LINE__ << ", FAILED TO WRITE MESH_DOMAIN_EXTENTS" << endl;
        logFile << "(MAIN) writeGrid: ERROR FAILED TO WRITE MESH_DOMAIN_EXTENTS AT: " << __FILE__ << " " << __LINE__ <<
