@@ -1736,7 +1736,10 @@ bool writeRestart(
 
    //Write domain sizes:
    if( writeDomainSizes( vlsvWriter, meshName, local_cells.size(), ghost_cells.size() ) == false ) return false;
-
+   
+   //Write domain extents
+   if( writeDomainExtents( vlsvWriter, meshName, local_cells, mpiGrid ) == false )  return false;
+  
    //Write FSGrid metadata
    if( writeFsGridMetadata( technicalGrid, vlsvWriter, true ) == false ) return false;
    
