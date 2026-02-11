@@ -312,7 +312,7 @@ jobs:
       - name: Compile vlasiator (Testpackage build w/ HIP)
         run: |
           srun -C g --job-name CI_tp_G_compile --interactive --nodes=1 -n 1 -c 16 --mem-per-cpu=2G -t 0:20:0 bash -c 'module load papi; module load rocm/6.2.0; module load cray-pmi; module load craype-accel-amd-gfx90a; module load libfabric/1.22.0; export MPICH_GPU_SUPPORT_ENABLED=1; export VLASIATOR_ARCH=hile_gpu; make -j 16 testpackage; sleep 10s'
-      - name: Make sure the output binary is visible in lustre"
+      - name: Make sure the output binary is visible in lustre
         uses: nick-fields/retry@v3
         with:
           timeout_seconds: 15
