@@ -362,7 +362,7 @@ jobs:
           submodules: true
       - name: Make clean
         run: VLASIATOR_ARCH=hile_gpu make clean
-      - name: Fetch libraries
+      - name: Fetch libraries/
         uses: actions/download-artifact@v5
         with:
           name: libraries-hile_g
@@ -921,8 +921,8 @@ jobs:
         chmod +x $GITHUB_WORKSPACE/fluxfunction
         srun -C c --job-name fluxtest --nodes=1 -n 1 -c 1 --mem-per-cpu=2G -t 0:10:0 bash -c 'module load papi; module load cray-pmi; module load libfabric/1.22.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_small/bulk.0000001.vlsv equatorial.bin'
         srun -C c --job-name fluxtest --nodes=1 -n 1 -c 1 --mem-per-cpu=2G -t 0:10:0 bash -c 'module load papi; module load cray-pmi; module load libfabric/1.22.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_polar_small/bulk.0000001.vlsv polar.bin'
-        diff -q equatorial.bin /wrk-kappa/group/spacephysics/vlasiator/testpackage/CI_reference/equatorial.bin
-        diff -q polar.bin /wrk-kappa/group/spacephysics/vlasiator/testpackage/CI_reference/polar.bin
+        diff -q equatorial.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/equatorial.bin
+        diff -q polar.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/polar.bin
 
   # run_TP_ukkoGPU:
   #   # Run the testpackage on the Ukko GPU cluster (via Carrington frontend)
