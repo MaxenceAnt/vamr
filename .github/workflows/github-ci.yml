@@ -43,7 +43,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
       - name: Run library build script
-        run: srun --interactive -J build_libs_hile-g -n 1 -c 64 bash -c "module purge;module load papi; module load rocm/6.3.4; module load cray-pmi;module load craype-accel-amd-gfx90a;module load libfabric/1.20.1; ./fetch_and_build_libraries.sh hile_gpu"
+        run: srun --interactive -J build_libs_hile-g -n 1 -c 64 bash -c "module load papi; module load rocm/6.3.4; module load cray-pmi;module load craype-accel-amd-gfx90a;module load libfabric/1.20.1; ./fetch_and_build_libraries.sh hile_gpu"
       - name: Build libraries tar
         run: tar -zcf libraries-hile_gpu.tar.gz libraries-hile_gpu/
       - name: Upload libraries as artifact
