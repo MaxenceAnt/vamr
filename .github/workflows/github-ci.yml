@@ -54,17 +54,34 @@ jobs:
           retention-days: 5
           if-no-files-found: error
 
-
-  build_libraries_carrington:
-    # Build libraries for the current version of the docker image
-    # (to be used in any subsequent compilation and run jobs on said image)
+  build_libraries_ukkoGPU:
+    # Build libraries for the GPU builds on ukko below
     runs-on: carrington
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
       - name: Run library build script
-        run: srun --interactive --constraint "carrington|ukko" -J build_libs -n 1 -c 64 bash -c "module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; ./fetch_and_build_libraries.sh carrington"
+        run: srun --interactive --constraint "ukko" -p gpu -J build_libs -n 1 -c 64 bash -c "module purge; ml OpenMPI/4.1.6.withucx-GCC-13.2.0 PAPI/7.1.0-GCCcore-13.2.0 CUDA/12.6.0; ./fetch_and_build_libraries.sh ukkogpu"
+      - name: Build libraries tar
+        run: tar -zcf libraries-ukkogpu.tar.gz libraries-ukkogpu/
+      - name: Upload libraries as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libraries-ukkogpu
+          path: libraries-ukkogpu.tar.gz
+          retention-days: 5
+          if-no-files-found: error
+
+  build_libraries_carrington:
+    # Build libraries for the testpackage build and run on the carrington cluster (also, ukko CPU side)
+    runs-on: carrington
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Run library build script
+        run: srun --interactive --constraint "carrington|ukko" -J build_libs -n 1 -c 64 bash -c "module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; module load Boost/1.83.0-GCC-13.2.0; ./fetch_and_build_libraries.sh carrington"
       - name: Build libraries tar
         run: tar -zcf libraries-carrington.tar.gz libraries-carrington/
       - name: Upload libraries as artifact
@@ -274,7 +291,7 @@ jobs:
     - name: Compile vlasiator (Testpackage build)
       run: |
         export VLASIATOR_ARCH=carrington_gcc_openmpi
-        srun --constraint "carrington|ukko" --job-name CI_tp_compile --interactive --nodes=1 -n 1 -c 16 --mem=40G -p short -t 0:10:0 bash -c 'module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; export VLASIATOR_ARCH=carrington_gcc_openmpi; make -j 16 testpackage; sleep 10s'
+        srun --constraint "carrington|ukko" --job-name CI_tp_compile --interactive --nodes=1 -n 1 -c 16 --mem=40G -p short -t 0:10:0 bash -c 'module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; module load Boost/1.83.0-GCC-13.2.0; export VLASIATOR_ARCH=carrington_gcc_openmpi; make -j 16 testpackage; sleep 10s'
     - name: Make sure the output binary is visible in lustre
       uses: nick-fields/retry@v3
       with:
@@ -298,7 +315,7 @@ jobs:
     # Build Vlasiator with testpackage flags, on the ukko cluster using
     # its nvidia gpus
     runs-on: carrington
-    needs: build_libraries_carrington
+    needs: build_libraries_ukkoGPU
 
     steps:
       - name: Clean workspace
@@ -321,7 +338,7 @@ jobs:
         with:
           name: libraries-carrington
       - name: Unpack libraries
-        run: tar -zxf libraries-carrington.tar.gz
+        run: tar -zxf libraries-ukkoGPU.tar.gz
       - uses: ursg/gcc-problem-matcher@master
       - name: Compile vlasiator (Testpackage build w/ CUDA)
         run: |
@@ -518,7 +535,7 @@ jobs:
     # Build Vlasiator with testpackage and debug flags, on the ukko cluster using
     # its nvidia gpus
     runs-on: carrington
-    needs: build_libraries_carrington
+    needs: build_libraries_ukkoGPU
 
     steps:
       - name: Clean workspace
@@ -539,9 +556,9 @@ jobs:
       - name: Fetch libraries
         uses: actions/download-artifact@v5
         with:
-          name: libraries-carrington
+          name: libraries-ukkogpu
       - name: Unpack libraries
-        run: tar -zxf libraries-carrington.tar.gz
+        run: tar -zxf libraries-ukkogpu.tar.gz
       - uses: ursg/gcc-problem-matcher@master
       - name: Compile vlasiator (Testpackage build w/ CUDA, debug)
         run: |
@@ -565,7 +582,7 @@ jobs:
     # Build Vlasiator with production, debug, and warp accessor flags, on the ukko cluster using
     # its nvidia gpus.
     runs-on: carrington
-    needs: build_libraries_carrington
+    needs: build_libraries_ukkoGPU
 
     steps:
       - name: Clean workspace
@@ -586,9 +603,9 @@ jobs:
       - name: Fetch libraries
         uses: actions/download-artifact@v5
         with:
-          name: libraries-carrington
+          name: libraries-ukkogpu
       - name: Unpack libraries
-        run: tar -zxf libraries-carrington.tar.gz
+        run: tar -zxf libraries-ukkogpu.tar.gz
       - uses: ursg/gcc-problem-matcher@master
       - name: Compile vlasiator (Production build w/ CUDA, debug, WA)
         run: |
@@ -697,7 +714,7 @@ jobs:
     - name: Compile tools
       run: |
         export VLASIATOR_ARCH=carrington_gcc_openmpi
-        srun --constraint "carrington|ukko" --job-name CI_tools_compile --interactive --nodes=1 -n 1 -c 1 --mem=4G -p short -t 0:10:0 bash -c 'module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; export VLASIATOR_ARCH=carrington_gcc_openmpi; make vlsvextract vlsvdiff fluxfunction'
+        srun --constraint "carrington|ukko" --job-name CI_tools_compile --interactive --nodes=1 -n 1 -c 1 --mem=4G -p short -t 0:10:0 bash -c 'module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; module load Boost/1.83.0-GCC-13.2.0; export VLASIATOR_ARCH=carrington_gcc_openmpi; make vlsvextract vlsvdiff fluxfunction'
     - name: Upload tools binaries
       uses: actions/upload-artifact@v4
       with:
@@ -711,7 +728,7 @@ jobs:
   build_tools_ukkoGPU:
     # Build vlsvdiff and vlsvextract for testpackage use
     runs-on: carrington
-    needs: build_libraries_carrington
+    needs: build_libraries_ukkoGPU
 
     steps:
     - name: Clean workspace
@@ -733,9 +750,9 @@ jobs:
     - name: Fetch libraries
       uses: actions/download-artifact@v5
       with:
-        name: libraries-carrington
+        name: libraries-ukkogpu
     - name: Unpack libraries
-      run: tar -zxf libraries-carrington.tar.gz
+      run: tar -zxf libraries-ukkogpu.tar.gz
     - name: Compile tools
       run: |
           export VLASIATOR_ARCH=ukko_dgx
@@ -855,8 +872,8 @@ jobs:
     - name: Run fluxfunction test
       run: |
         chmod +x $GITHUB_WORKSPACE/fluxfunction
-        srun --job-name fluxtest --constraint "carrington|ukko" -N 1 -c 1 --mem=1G bash -c "module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_small/bulk.0000001.vlsv equatorial.bin"
-        srun --job-name fluxtest --constraint "carrington|ukko" -N 1 -c 1 --mem=1G bash -c "module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_polar_small/bulk.0000001.vlsv polar.bin"
+        srun --job-name fluxtest --constraint "carrington|ukko" -N 1 -c 1 --mem=1G bash -c "module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; module load Boost/1.83.0-GCC-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_small/bulk.0000001.vlsv equatorial.bin"
+        srun --job-name fluxtest --constraint "carrington|ukko" -N 1 -c 1 --mem=1G bash -c "module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; module load Boost/1.83.0-GCC-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_polar_small/bulk.0000001.vlsv polar.bin"
         diff -q equatorial.bin /proj/group/spacephysics/vlasiator_testpackage/CI_reference/equatorial.bin
         diff -q polar.bin /proj/group/spacephysics/vlasiator_testpackage/CI_reference/polar.bin
 
@@ -934,7 +951,7 @@ jobs:
   # run_TP_ukkoGPU:
   #   # Run the testpackage on the Ukko GPU cluster (via Carrington frontend)
   #   runs-on: carrington
-  #   needs: [build_TP_ukkoGPU, build_tools_ukkoGPU, build_libraries_carrington]
+  #   needs: [build_TP_ukkoGPU, build_tools_ukkoGPU, build_libraries_ukkoGPU]
   #   continue-on-error: true
 
   #   steps:
@@ -953,9 +970,9 @@ jobs:
   #  - name: Fetch libraries
   #     uses: actions/download-artifact@v5
   #     with:
-  #       name: libraries-carrington
+  #       name: libraries-ukkogpu
   #   - name: Unpack libraries
-  #     run: tar -zxf libraries-carrington.tar.gz
+  #     run: tar -zxf libraries-ukkogpu.tar.gz
   #   - name: Run GPU testpackage
   #     id: run
   #     run: |

@@ -101,8 +101,8 @@ INC_VLSV = -I$(LIBRARY_PREFIX)/include
 LIB_JEMALLOC = -L$(LIBRARY_PREFIX)/lib -ljemalloc
 INC_JEMALLOC = -isystem $(LIBRARY_PREFIX)/include
 
-LIB_BOOST = -L$(LIBRARY_PREFIX)/lib -lboost_program_options
-INC_BOOST = -isystem $(LIBRARY_PREFIX)/include
+LIB_BOOST = -lboost_program_options
+INC_BOOST = 
 
 LIB_ZOLTAN = -L$(LIBRARY_PREFIX)/lib -lzoltan
 INC_ZOLTAN = -isystem $(LIBRARY_PREFIX)/include
