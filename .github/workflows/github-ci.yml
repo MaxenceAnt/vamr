@@ -46,12 +46,12 @@ jobs:
       - name: Run library build script
         run: srun --interactive --constraint "carrington|ukko" -J build_libs -n 1 -c 64 bash -c "module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; ./fetch_and_build_libraries.sh carrington"
       - name: Build libraries tar
-        run: tar --zstd -cvf libraries-carrington.tar.zstd libraries-carrington/
+        run: tar -zcvf libraries-carrington.tar.gz libraries-carrington/
       - name: Upload libraries as artifact
         uses: actions/upload-artifact@v4
         with:
           name: libraries-carrington
-          path: libraries-carrington.tar.zstd
+          path: libraries-carrington.tar.gz
           retention-days: 5
           if-no-files-found: error
 
@@ -249,7 +249,7 @@ jobs:
       with:
         name: libraries-carrington
     - name: Unpack libraries
-      run: tar --zstd -xvf libraries-carrington.tar.zstd
+      run: tar -zxvf libraries-carrington.tar.gz
     - uses: ursg/gcc-problem-matcher@master
     - name: Compile vlasiator (Testpackage build)
       run: |
@@ -301,7 +301,7 @@ jobs:
         with:
           name: libraries-carrington
       - name: Unpack libraries
-        run: tar --zstd -xvf libraries-carrington.tar.zstd
+        run: tar -zxvf libraries-carrington.tar.gz
       - uses: ursg/gcc-problem-matcher@master
       - name: Compile vlasiator (Testpackage build w/ CUDA)
         run: |
@@ -508,7 +508,7 @@ jobs:
         with:
           name: libraries-carrington
       - name: Unpack libraries
-        run: tar --zstd -xvf libraries-carrington.tar.zstd
+        run: tar -zxvf libraries-carrington.tar.gz
       - uses: ursg/gcc-problem-matcher@master
       - name: Compile vlasiator (Testpackage build w/ CUDA, debug)
         run: |
@@ -555,7 +555,7 @@ jobs:
         with:
           name: libraries-carrington
       - name: Unpack libraries
-        run: tar --zstd -xvf libraries-carrington.tar.zstd
+        run: tar -zxvf libraries-carrington.tar.gz
       - uses: ursg/gcc-problem-matcher@master
       - name: Compile vlasiator (Production build w/ CUDA, debug, WA)
         run: |
@@ -660,7 +660,7 @@ jobs:
       with:
         name: libraries-carrington
     - name: Unpack libraries
-      run: tar --zstd -xvf libraries-carrington.tar.zstd
+      run: tar -zxvf libraries-carrington.tar.gz
     - name: Compile tools
       run: |
         export VLASIATOR_ARCH=carrington_gcc_openmpi
@@ -702,7 +702,7 @@ jobs:
       with:
         name: libraries-carrington
     - name: Unpack libraries
-      run: tar --zstd -xvf libraries-carrington.tar.zstd
+      run: tar -zxvf libraries-carrington.tar.gz
     - name: Compile tools
       run: |
           export VLASIATOR_ARCH=ukko_dgx
@@ -774,7 +774,7 @@ jobs:
       with:
         name: libraries-carrington
     - name: Unpack libraries
-      run: tar --zstd -xvf libraries-carrington.tar.zstd
+      run: tar -zxvf libraries-carrington.tar.gz
     - name: Run testpackage
       id: run
       run: |
@@ -922,7 +922,7 @@ jobs:
   #     with:
   #       name: libraries-carrington
   #   - name: Unpack libraries
-  #     run: tar --zstd -xvf libraries-carrington.tar.zstd
+  #     run: tar -zxvf libraries-carrington.tar.gz
   #   - name: Run GPU testpackage
   #     id: run
   #     run: |
