@@ -391,7 +391,7 @@ jobs:
     # Build Vlasiator with production flags and all the debug flags enabled, on the HILE cluster using
     # its AMD gpus
     runs-on: hile
-    needs: build_libs_hile-g
+    needs: build_libraries_hile-g
     steps:
       - name: Clean workspace
         run: |
