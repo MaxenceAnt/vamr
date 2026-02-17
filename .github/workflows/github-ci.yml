@@ -336,9 +336,9 @@ jobs:
       - name: Fetch libraries
         uses: actions/download-artifact@v5
         with:
-          name: libraries-carrington
+          name: libraries-ukkogpu
       - name: Unpack libraries
-        run: tar -zxf libraries-ukkoGPU.tar.gz
+        run: tar -zxf libraries-ukkogpu.tar.gz
       - uses: ursg/gcc-problem-matcher@master
       - name: Compile vlasiator (Testpackage build w/ CUDA)
         run: |
