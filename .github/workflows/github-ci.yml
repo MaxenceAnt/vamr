@@ -345,7 +345,7 @@ jobs:
     # Build Vlasiator with testpackage flags, on the HILE cluster using
     # its AMD gpus
     runs-on: hile
-
+    needs: build_libraries_hile-g
     steps:
       - name: Clean workspace
         run: |
@@ -365,9 +365,9 @@ jobs:
       - name: Fetch libraries
         uses: actions/download-artifact@v5
         with:
-          name: libraries-hile_g
+          name: libraries-hile_gpu
       - name: Unpack libraries
-        run: tar -zxf libraries-hile_g.tar.gz
+        run: tar -zxf libraries-hile_gpu.tar.gz
       - uses: ursg/gcc-problem-matcher@master
       - name: Compile vlasiator (Testpackage build w/ HIP)
         run: |
