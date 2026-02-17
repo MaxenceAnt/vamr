@@ -34,6 +34,26 @@ jobs:
           path: libraries.tar.zstd
           retention-days: 5
           if-no-files-found: error
+  build_libraries_hile-g:
+    # Build libraries for the current version of the docker image
+    # (to be used in any subsequent compilation and run jobs on said image)
+    runs-on: hile
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Run library build script
+        run: srun --interactive -J build_libs_hile-g -n 1 -c 64 bash -c "module purge;module load papi; module load rocm/6.3.4; module load cray-pmi;module load craype-accel-amd-gfx90a;module load libfabric/1.20.1; ./fetch_and_build_libraries.sh hile_gpu"
+      - name: Build libraries tar
+        run: tar -zcf libraries-hile_gpu.tar.gz libraries-hile_gpu/
+      - name: Upload libraries as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libraries-hile_gpu
+          path: libraries-hile_gpu.tar.gz
+          retention-days: 5
+          if-no-files-found: error
+
 
   build_libraries_carrington:
     # Build libraries for the current version of the docker image
@@ -342,6 +362,12 @@ jobs:
           submodules: true
       - name: Make clean
         run: VLASIATOR_ARCH=hile_gpu make clean
+      - name: Fetch libraries
+        uses: actions/download-artifact@v5
+        with:
+          name: libraries-hile_g
+      - name: Unpack libraries
+        run: tar -zxf libraries-hile_g.tar.gz
       - uses: ursg/gcc-problem-matcher@master
       - name: Compile vlasiator (Testpackage build w/ HIP)
         run: |
