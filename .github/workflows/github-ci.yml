@@ -362,7 +362,7 @@ jobs:
           submodules: true
       - name: Make clean
         run: VLASIATOR_ARCH=hile_gpu make clean
-      - name: Fetch libraries/
+      - name: Fetch libraries
         uses: actions/download-artifact@v5
         with:
           name: libraries-hile_g
