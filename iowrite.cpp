@@ -642,7 +642,7 @@ bool writeDomainSizes( Writer & vlsvWriter,
  */
 
 bool writeDomainExtents(Writer& vlsvWriter, const string& meshName, const std::vector<CellID>& local_cells,
-                        dccrg::Dccrg<SpatialCell, dccrg::Cartesian_Geometry>& mpiGrid) {
+                        const dccrg::Dccrg<SpatialCell, dccrg::Cartesian_Geometry>& mpiGrid) {
    vector<CellID>::const_iterator it;
 
    // Write the array:
@@ -650,7 +650,7 @@ bool writeDomainExtents(Writer& vlsvWriter, const string& meshName, const std::v
    // Put the meshName
    xmlAttributes["mesh"] = meshName;
    //Get the first cell in domain as a base for comparing against
-   SpatialCell& firstCell = *mpiGrid[*local_cells.begin()]; 
+   const SpatialCell& firstCell = *mpiGrid[*local_cells.begin()]; 
    Real ret[6] = {
        firstCell.parameters[CellParams::XCRD], firstCell.parameters[CellParams::XCRD] + firstCell.parameters[CellParams::DX],
        firstCell.parameters[CellParams::YCRD], firstCell.parameters[CellParams::YCRD] + firstCell.parameters[CellParams::DY],
@@ -660,7 +660,7 @@ bool writeDomainExtents(Writer& vlsvWriter, const string& meshName, const std::v
    for (it = local_cells.begin() + 1; it != local_cells.end(); it++) {
       CellID cellId = *it;
 
-      SpatialCell& cell = *mpiGrid[cellId];
+      const SpatialCell& cell = *mpiGrid[cellId];
       Real lowcorner[6] = {
           cell.parameters[CellParams::XCRD], cell.parameters[CellParams::XCRD] + cell.parameters[CellParams::DX],
           cell.parameters[CellParams::YCRD], cell.parameters[CellParams::YCRD] + cell.parameters[CellParams::DY],
