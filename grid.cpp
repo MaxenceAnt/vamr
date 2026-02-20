@@ -1384,7 +1384,7 @@ bool adaptRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGri
       }
    }
 
-   transferInParts(mpiGrid, incoming_cells_list, outgoing_cells_list);
+   transferInParts(mpiGrid, incoming_cells_list, outgoing_cells_list, true);
 
    phiprof::Timer copyChildrenTimer {"copy to children"};
    for (CellID id : newChildren) {
