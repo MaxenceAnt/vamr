@@ -1369,48 +1369,22 @@ bool adaptRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGri
    auto newChildren = mpiGrid.execute_refines();
    executeTimer.stop();
 
-   std::vector<CellID> receives;
+   // TODO surely this doesn't need a for loop
+   std::vector<CellID> incoming_cells_list;
    for (auto const& [key, val] : mpiGrid.get_cells_to_receive()) {
       for (auto i : val) {
-         receives.push_back(i.first);
+         incoming_cells_list.push_back(i.first);
       }
    }
 
-   phiprof::Timer transfersTimer {"transfers"};
-   for (size_t popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
-      // Set active population
-      SpatialCell::setCommunicatedSpecies(popID);
-
-      //Transfer velocity block list
-      SpatialCell::set_mpi_transfer_type(Transfer::VEL_BLOCK_LIST_STAGE1);
-      mpiGrid.continue_refining();
-      SpatialCell::set_mpi_transfer_type(Transfer::VEL_BLOCK_LIST_STAGE2);
-      mpiGrid.continue_refining();
-
-      int prepareReceives {phiprof::initializeTimer("Preparing receives")};
-      for (CellID id : receives) {
-         // reserve space for velocity block data in arriving remote cells
-         phiprof::Timer timer {prepareReceives};
-         mpiGrid[id]->prepare_to_receive_blocks(popID);
-         timer.stop(1, "Spatial cells");
+   std::vector<CellID> outgoing_cells_list;
+   for (auto const& [key, val] : mpiGrid.get_cells_to_send()) {
+      for (auto i : val) {
+         outgoing_cells_list.push_back(i.first);
       }
-
-      if(receives.empty()) {
-         //empty phiprof timer, to avoid unneccessary divergence in unique
-         //profiles (keep order same)
-         phiprof::Timer timer {prepareReceives};
-         timer.stop(0, "Spatial cells");
-      }
-
-      //do the actual transfer of data for the set of cells to be transferred
-      phiprof::Timer transferTimer {"transfer_all_data"};
-      SpatialCell::set_mpi_transfer_type(Transfer::ALL_DATA);
-      mpiGrid.continue_refining();
-      transferTimer.stop();
-
-      memory_purge(); // Purge jemalloc allocator to actually release memory
    }
-   transfersTimer.stop();
+
+   transferInParts(mpiGrid, incoming_cells_list, outgoing_cells_list);
 
    phiprof::Timer copyChildrenTimer {"copy to children"};
    for (CellID id : newChildren) {
