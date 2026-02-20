@@ -28,7 +28,7 @@
 #include "cpu_face_estimates.hpp"
 
 /*make sure quartic polynomial is monotonic*/
-static inline void filter_pqm_monotonicity(const Vec* __restrict__ values, uint k, Vec &fv_l, Vec &fv_r, Vec &fd_l, Vec &fd_r){
+static inline void filter_pqm_monotonicity(const Vec* __restrict__ values, const uint k, Vec &fv_l, Vec &fv_r, Vec &fd_l, Vec &fd_r){
    /*second derivative coefficients, eq 23 in white et al.*/
    const Vec b0 =   60.0 * values[k] - 24.0 * fv_r - 36.0 * fv_l + 3.0 * (fd_r - 3.0 * fd_l);
    const Vec b1 = -360.0 * values[k] + 36.0 * fd_l - 24.0 * fd_r + 168.0 * fv_r + 192.0 * fv_l;
@@ -154,7 +154,7 @@ static inline void filter_pqm_monotonicity(const Vec* __restrict__ values, uint 
 //   White, Laurent, and Alistair Adcroft. “A High-Order Finite Volume Remapping Scheme for Nonuniform Grids: The Piecewise Quartic Method (PQM).” Journal of Computational Physics 227, no. 15 (July 2008): 7394–7422. doi:10.1016/j.jcp.2008.04.026.
 // */
 
-static inline void compute_pqm_coeff(const Vec* __restrict__ values, face_estimate_order order, uint k, Vec a[5], const Realf threshold)
+static inline void compute_pqm_coeff(const Vec* __restrict__ values,const face_estimate_order order,const uint k, Vec a[5], const Realf threshold)
 {
    Vec fv_l; /*left face value*/
    Vec fv_r; /*right face value*/
