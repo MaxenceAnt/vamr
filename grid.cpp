@@ -481,40 +481,11 @@ void setFaceNeighborRanks( dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
    }
 }
 
-void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, SysBoundary& sysBoundaries, FsGrid<fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid, bool doTranslationLists){
-   // Invalidate cached cell lists
-   Parameters::meshRepartitioned = true;
-
-   // tell other processes which velocity blocks exist in remote spatial cells
-   phiprof::Timer balanceLoadTimer {"Balancing load", {"Load balance"}};
-
-   phiprof::Timer deallocTimer {"deallocate boundary data"};
-   //deallocate blocks in remote cells to decrease memory load
-   deallocateRemoteCellBlocks(mpiGrid);
-   deallocTimer.stop();
-
-   //set weights based on each cells LB weight counter
-   const vector<CellID>& cells = getLocalCells();
-   for (size_t i=0; i<cells.size(); ++i){
-      // Set cell weight. We could use different counters or number of blocks if different solvers are active.
-      // if (P::propagateVlasovAcceleration)
-      // When using the FS-SPLIT functionality, Jaro Hokkanen reported issues with using the regular
-      // CellParams::LBWEIGHTCOUNTER, so use of blockscounts + 1 might be required.
-      mpiGrid.set_cell_weight(cells[i], (Real)1 + mpiGrid[cells[i]]->parameters[CellParams::LBWEIGHTCOUNTER]);
-   }
-
-   phiprof::Timer initLBTimer {"dccrg.initialize_balance_load"};
-   mpiGrid.initialize_balance_load(true);
-   initLBTimer.stop();
-
-   const std::unordered_set<CellID>& incoming_cells = mpiGrid.get_cells_added_by_balance_load();
-   std::vector<CellID> incoming_cells_list (incoming_cells.begin(),incoming_cells.end());
-
-   const std::unordered_set<CellID>& outgoing_cells = mpiGrid.get_cells_removed_by_balance_load();
-   std::vector<CellID> outgoing_cells_list (outgoing_cells.begin(),outgoing_cells.end());
-
-   /*transfer cells in parts to preserve memory*/
+// TODO bool here is kinda stupid but less janky than function pointer
+void transferInParts(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, std::vector<CellID> incoming_cells_list, std::vector<CellID> outgoing_cells_list, bool refinement = false)
+{
    phiprof::Timer transfersTimer {"Data transfers"};
+   const vector<CellID>& cells = getLocalCells();
 
    // Idea: do as many cell sending passes hereafter so that there's not more than transfer_block_fraction_limit
    // blocks of this task's total block count that gets sent. Helps in reducing memory peaks during load balancing.
@@ -596,12 +567,20 @@ void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, S
          // Transfer velocity block lists. On-device GPU mesh preparation tasks require
          // device synchronization between transfer phases.
          SpatialCell::set_mpi_transfer_type(Transfer::VEL_BLOCK_LIST_STAGE1);
-         mpiGrid.continue_balance_load();
+         if (!refinement) {
+            mpiGrid.continue_balance_load();
+         } else {
+            mpiGrid.continue_refining();
+         }
          #ifdef USE_GPU
          CHK_ERR( gpuDeviceSynchronize() );
          #endif
          SpatialCell::set_mpi_transfer_type(Transfer::VEL_BLOCK_LIST_STAGE2);
-         mpiGrid.continue_balance_load();
+         if (!refinement) {
+            mpiGrid.continue_balance_load();
+         } else {
+            mpiGrid.continue_refining();
+         }
          #ifdef USE_GPU
          CHK_ERR( gpuDeviceSynchronize() );
          #endif
@@ -630,7 +609,11 @@ void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, S
          //do the actual transfer of data for the set of cells to be transferred
          phiprof::Timer transferTimer {"transfer_all_data"};
          SpatialCell::set_mpi_transfer_type(Transfer::ALL_DATA);
-         mpiGrid.continue_balance_load();
+         if (!refinement) {
+            mpiGrid.continue_balance_load();
+         } else {
+            mpiGrid.continue_refining();
+         }
          transferTimer.stop();
 
          // Free memory for cells that have been sent (the block data)
@@ -648,6 +631,43 @@ void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, S
       } // for-loop over populations
    } // for-loop over transfer parts
    transfersTimer.stop();
+
+}
+
+void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, SysBoundary& sysBoundaries, FsGrid<fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid, bool doTranslationLists){
+   // Invalidate cached cell lists
+   Parameters::meshRepartitioned = true;
+
+   // tell other processes which velocity blocks exist in remote spatial cells
+   phiprof::Timer balanceLoadTimer {"Balancing load", {"Load balance"}};
+
+   phiprof::Timer deallocTimer {"deallocate boundary data"};
+   //deallocate blocks in remote cells to decrease memory load
+   deallocateRemoteCellBlocks(mpiGrid);
+   deallocTimer.stop();
+
+   //set weights based on each cells LB weight counter
+   const vector<CellID>& cells = getLocalCells();
+   for (size_t i=0; i<cells.size(); ++i){
+      // Set cell weight. We could use different counters or number of blocks if different solvers are active.
+      // if (P::propagateVlasovAcceleration)
+      // When using the FS-SPLIT functionality, Jaro Hokkanen reported issues with using the regular
+      // CellParams::LBWEIGHTCOUNTER, so use of blockscounts + 1 might be required.
+      mpiGrid.set_cell_weight(cells[i], (Real)1 + mpiGrid[cells[i]]->parameters[CellParams::LBWEIGHTCOUNTER]);
+   }
+
+   phiprof::Timer initLBTimer {"dccrg.initialize_balance_load"};
+   mpiGrid.initialize_balance_load(true);
+   initLBTimer.stop();
+
+   const std::unordered_set<CellID>& incoming_cells = mpiGrid.get_cells_added_by_balance_load();
+   std::vector<CellID> incoming_cells_list (incoming_cells.begin(),incoming_cells.end());
+
+   const std::unordered_set<CellID>& outgoing_cells = mpiGrid.get_cells_removed_by_balance_load();
+   std::vector<CellID> outgoing_cells_list (outgoing_cells.begin(),outgoing_cells.end());
+
+   /*transfer cells in parts to preserve memory*/
+   transferInParts(mpiGrid, incoming_cells_list, outgoing_cells_list);
 
    //finish up load balancing
    phiprof::Timer finishLBTimer {"dccrg.finish_balance_load"};
