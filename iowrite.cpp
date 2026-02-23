@@ -57,7 +57,7 @@ char* IObuffer = 0; // For GPU VDF output
 typedef Parameters P;
 
 bool writeVelocityDistributionData(const uint popID,Writer& vlsvWriter,
-                                   dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
+                                   const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
                                    const std::vector<CellID>& cells,MPI_Comm comm);
 
 /*! Updates local ids across MPI to let other processes know in which order this process saves the local cell ids
@@ -123,7 +123,7 @@ bool globalSuccess(bool success, const string& errorMessage, MPI_Comm comm){
  @param comm The MPI communicator.
  @return Returns true if operation was successful.*/
 bool writeVelocityDistributionData(Writer& vlsvWriter,
-                                   dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
+                                   const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
                                    const vector<CellID>& cells,MPI_Comm comm) {
    bool success = true;
    for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
@@ -139,7 +139,7 @@ bool writeVelocityDistributionData(Writer& vlsvWriter,
  @param comm The MPI communicator.
  @return Returns true if operation was successful.*/
 bool writeVelocityDistributionData(const uint popID,Writer& vlsvWriter,
-                                   dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
+                                   const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
                                    const std::vector<CellID>& cells,MPI_Comm comm) {
    // Write velocity blocks and related data. 
    // In restart we just write velocity grids for all cells.
@@ -484,7 +484,7 @@ bool writeDataReducer(const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>&
  */
 bool writeCommonGridData(
    Writer& vlsvWriter,
-   dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
+   const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
    const vector<uint64_t>& local_cells,
    const uint& fileIndex,
    MPI_Comm comm
@@ -542,7 +542,7 @@ bool writeCommonGridData(
  \return Returns true if operation was successful
  \sa updateLocalIds
  */
-bool writeGhostZoneDomainAndLocalIdNumbers( dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
+bool writeGhostZoneDomainAndLocalIdNumbers( const dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
                                               Writer & vlsvWriter,
                                               const string & meshName,
                                               const vector<uint64_t> & ghost_cells ) {
@@ -858,7 +858,7 @@ bool writeMeshBoundingBox( Writer & vlsvWriter,
  \param comm MPI comm
  \return Returns true if operation was successful
  */
-bool writeVersionInfo(std::string version,vlsv::Writer& vlsvWriter,MPI_Comm comm){
+bool writeVersionInfo(const std::string& version,vlsv::Writer& vlsvWriter,MPI_Comm comm){
   
    int myRank;
    MPI_Comm_rank(comm, &myRank);
@@ -882,7 +882,7 @@ bool writeVersionInfo(std::string version,vlsv::Writer& vlsvWriter,MPI_Comm comm
  \param comm MPI comm
  \return Returns true if operation was successful
  */
-bool writeConfigInfo(std::string config,vlsv::Writer& vlsvWriter,MPI_Comm comm){
+bool writeConfigInfo(const std::string& config,vlsv::Writer& vlsvWriter,MPI_Comm comm){
   
    int myRank;
    MPI_Comm_rank(comm, &myRank);
@@ -914,7 +914,7 @@ bool writeFsGridMetadata(FsGrid< fsgrids::technical, FS_STENCIL_WIDTH> & technic
 
   //The visit plugin expects MESH_BBOX as a keyword. We only write one
   //from the first rank.
-  std::array<FsGridTools::FsSize_t, 3>& globalSize = technicalGrid.getGlobalSize();
+  const std::array<FsGridTools::FsSize_t, 3>& globalSize = technicalGrid.getGlobalSize();
   std::array<FsGridTools::FsSize_t, 6> boundaryBox({globalSize[0], globalSize[1], globalSize[2],
       1,1,1});
 
@@ -962,7 +962,7 @@ bool writeFsGridMetadata(FsGrid< fsgrids::technical, FS_STENCIL_WIDTH> & technic
   vlsvWriter.writeArray("MESH_GHOST_LOCALIDS", xmlAttributes, 0, 1, &dummyghost);
 
   // writeDomainSizes
-  std::array<FsGridTools::FsIndex_t,3>& localSize = technicalGrid.getLocalSize();
+  const std::array<FsGridTools::FsIndex_t,3>& localSize = technicalGrid.getLocalSize();
   std::array<uint64_t,2> meshDomainSize({(uint64_t)localSize[0]*(uint64_t)localSize[1]*(uint64_t)localSize[2], 0});
   vlsvWriter.writeArray("MESH_DOMAIN_SIZES", xmlAttributes, 1, 2, &meshDomainSize[0]);
 
