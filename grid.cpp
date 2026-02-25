@@ -482,7 +482,7 @@ void setFaceNeighborRanks( dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
 }
 
 // TODO bool here is kinda stupid but less janky than function pointer
-void transferInParts(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, std::vector<CellID> incoming_cells_list, std::vector<CellID> outgoing_cells_list, bool refinement = false)
+void transferInParts(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, std::vector<CellID>& incoming_cells_list, std::vector<CellID>& outgoing_cells_list, bool refinement = false)
 {
    phiprof::Timer transfersTimer {"Data transfers"};
    const vector<CellID>& cells = getLocalCells();
@@ -539,8 +539,7 @@ void transferInParts(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGri
 
    for (uint64_t transfer_part=0; transfer_part<num_part_transfers; transfer_part++) {
       //Set transfers on/off for the incoming cells in this transfer set and prepare for receive
-      for (unsigned int i=0;i<incoming_cells_list.size();i++){
-         CellID cell_id=incoming_cells_list[i];
+      for (const CellID& cell_id : incoming_cells_list) {
          SpatialCell* cell = mpiGrid[cell_id];
          if (cell_id%num_part_transfers!=transfer_part) {
             cell->set_mpi_transfer_enabled(false);
@@ -550,8 +549,7 @@ void transferInParts(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGri
       }
 
       //Set transfers on/off for the outgoing cells in this transfer set
-      for (unsigned int i=0; i<outgoing_cells_list.size(); i++) {
-         CellID cell_id=outgoing_cells_list[i];
+      for (const CellID cell_id : outgoing_cells_list) {
          SpatialCell* cell = mpiGrid[cell_id];
          if (cell_id%num_part_transfers!=transfer_part) {
             cell->set_mpi_transfer_enabled(false);
@@ -588,8 +586,7 @@ void transferInParts(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGri
          int prepareReceives {phiprof::initializeTimer("Preparing receives")};
          int receives = 0;
          #pragma omp parallel for schedule(guided)
-         for (unsigned int i=0; i<incoming_cells_list.size(); i++) {
-            CellID cell_id=incoming_cells_list[i];
+         for (const CellID cell_id : incoming_cells_list) {
             SpatialCell* cell = mpiGrid[cell_id];
             if (cell_id % num_part_transfers == transfer_part) {
                receives++;
@@ -617,21 +614,25 @@ void transferInParts(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGri
          transferTimer.stop();
 
          // Free memory for cells that have been sent (the block data)
-         for (unsigned int i=0;i<outgoing_cells_list.size();i++){
-            CellID cell_id=outgoing_cells_list[i];
+         for (const CellID cell_id : outgoing_cells_list){
             SpatialCell* cell = mpiGrid[cell_id];
 
             // Free memory of this cell as it has already been transferred,
             // it will not be used anymore. NOTE: Only clears memory allocated
             // to the active population.
-            if (cell_id % num_part_transfers == transfer_part) cell->clear(popID,true);
+            if (cell_id % num_part_transfers == transfer_part) {
+               cell->clear(popID,true);
+            }
          }
 
          memory_purge(); // Purge jemalloc allocator to actually release memory
       } // for-loop over populations
    } // for-loop over transfer parts
-   transfersTimer.stop();
 
+   // Re-enable transfer for received cells
+   for (const CellID cell_id : incoming_cells_list) {
+      mpiGrid[cell_id]->set_mpi_transfer_enabled(true);
+   }
 }
 
 void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, SysBoundary& sysBoundaries, FsGrid<fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid, bool doTranslationLists){
@@ -674,6 +675,7 @@ void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, S
    mpiGrid.finish_balance_load();
    finishLBTimer.stop();
 
+   // TODO might not be required with transferInParts changes
    //Make sure transfers are enabled for all cells
    recalculateLocalCellsCache(mpiGrid);
    #pragma omp parallel for
