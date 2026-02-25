@@ -322,7 +322,7 @@ namespace SBC {
                      if (resetSolved || (bitfield & compute::BY) != compute::BY) {
                         perBGrid.get(i, j, k)->at(fsgrids::bfield::PERBY) = templateB[iface][1] + BgBGrid.get(i,j,k)->at(fsgrids::bgbfield::BGBYVDCORR);
                      }
-                     if (resetSolved || (bitfield & compute::BY) != compute::BY) {
+                     if (resetSolved || (bitfield & compute::BZ) != compute::BZ) {
                         perBGrid.get(i, j, k)->at(fsgrids::bfield::PERBZ) = templateB[iface][2] + BgBGrid.get(i,j,k)->at(fsgrids::bgbfield::BGBZVDCORR);
                      }
                      break;
