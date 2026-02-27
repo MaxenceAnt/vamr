@@ -94,6 +94,8 @@ namespace SBC {
    bool Ionosphere::solverToggleMinimumResidualVariant;
    Real Ionosphere::shieldingLatitude;
    enum Ionosphere::IonosphereConductivityModel Ionosphere::conductivityModel;
+   Real Ionosphere::fixedSigmaH;
+   Real Ionosphere::fixedSigmaP;
 
    // Offset field aligned currents so their sum is 0
    void SphericalTriGrid::offset_FAC() {
@@ -409,7 +411,7 @@ namespace SBC {
                      abort();
                   }
                   // Support negative indices (indices are 1-indexed)
-                  if(v < 0){ 
+                  if(v < 0) {
                      v = length + v;
                   } else {
                      v = v - 1;
@@ -430,7 +432,7 @@ namespace SBC {
                getline(fi, line);
             }
          }
-         
+
          if(nodes.size() == 0){
             cerr << "(IONOSPHERE) Error reading nodes in \"" << pathString << "\", expected a non-zero number of nodes to be specified." << endl;
             abort();
@@ -489,12 +491,12 @@ namespace SBC {
             string points;
             int size;
             string type;
-            
+
             if(!(pss >> points >> size >> type)){
                cerr << "(IONOSPHERE) Could not read POINTS field \"" << line << "\"" << " in " << pathString << endl;
                abort();
             }
-            
+
             if(!(points == "POINTS")){
                cerr << "(IONOSPHERE) Mandatory POINTS field not found, obtained " << line << "\" in " << pathString << endl;
                abort();
@@ -999,6 +1001,7 @@ namespace SBC {
                break;
             case Robinson2020:
             case Juusola2025:
+            case FixedSigma:
                // We don't need to actually do anything about the atmosphere here, and can just bail out.
                return;
             default:
@@ -1026,6 +1029,7 @@ namespace SBC {
                   break;
                case Robinson2020:
                case Juusola2025:
+               case FixedSigma:
                   // We don't need to actually do anything about the atmosphere here, and can just bail out.
                   return;
             }
@@ -1370,7 +1374,7 @@ namespace SBC {
             // Eigen vector and matrix for solving
             // Each current-density vector lives in the circumcentre of each triangle
             // The constraints are calculated on each node
-            Eigen::VectorXd vJ(2 * elements.size()); // 2 * elements.size() because we have two components of J in every element 
+            Eigen::VectorXd vJ(2 * elements.size()); // 2 * elements.size() because we have two components of J in every element
             Eigen::VectorXd vRHS1(nodes.size() + nodes.size()); // Right hand side for divergence-free system
             Eigen::VectorXd vRHS2(nodes.size() + nodes.size()); // Right hand side for curl-free system
             Eigen::SparseMatrix<Real> curlSolverMatrix(vRHS1.size(), vJ.size());
@@ -1382,8 +1386,8 @@ namespace SBC {
             // Then, solve divergence-free part.
             // Finally, estimate Sigmas.
 
-            // This formalism uses a cirumcentre-based current-density vector field. 
-            // 
+            // This formalism uses a cirumcentre-based current-density vector field.
+            //
             // To calculate the divergence at a specific node, the current density is
             // first interpolated to all the edges subtended by this node by weighing
             // the current-density of the elements subtended by a particular edge by
@@ -1393,11 +1397,11 @@ namespace SBC {
             // the fact that circumcentres are equidistant from the corners of a
             // triangle. Then, the dot product of the edge-interpolated current
             // densities with the edge parallel is taken, multiplied by the length of
-            // the dual to this edge, and summed over all edges subtended by the node. 
-            // 
+            // the dual to this edge, and summed over all edges subtended by the node.
+            //
             // Since the mesh is not flat, the edge vectors are be transformed to a
             // common coordinate system (XY plane at the north pole) before the dot
-            // product is taken 
+            // product is taken
             if(Eigen::loadMarket(curlSolverMatrix, "ionosphereSolverMatrix")){
 
                for(int n =0; n < nodes.size(); n++) {
@@ -1412,7 +1416,7 @@ namespace SBC {
 
                }
 
-         
+
 
             } else {
             // Divergence constraints
@@ -1420,14 +1424,14 @@ namespace SBC {
 
                // Divergence of divergence-free current
                vRHS1[gridNodeIndex] = 0;
-               
+
                //Divergence of curl-free current
                vRHS2[gridNodeIndex] = nodes[gridNodeIndex].parameters[ionosphereParameters::SOURCE];
 
                for(uint32_t elLocalIndex=0; elLocalIndex<nodes[gridNodeIndex].numTouchingElements; elLocalIndex++) {
                   SphericalTriGrid::Element& element = elements[nodes[gridNodeIndex].touchingElements[elLocalIndex]];
 
-                  // Find the two other nodes on this element 
+                  // Find the two other nodes on this element
                   int gridI=0,gridJ=0;
                   int localC=0,localI=0,localJ=0;
                   for(int c=0; c< 3; c++) {
@@ -1437,7 +1441,7 @@ namespace SBC {
                         gridI=element.corners[localI];
                         localJ = (c+2)%3;
                         gridJ=element.corners[localJ];
-                        break; 
+                        break;
                      }
                   }
 
@@ -1468,26 +1472,26 @@ namespace SBC {
 
                   curlSolverMatrix.coeffRef(gridNodeIndex, 2 * nodes[gridNodeIndex].touchingElements[elLocalIndex]) += edgem(0) * lj;
                   curlSolverMatrix.coeffRef(gridNodeIndex, 2 * nodes[gridNodeIndex].touchingElements[elLocalIndex] + 1) += edgem(1) * lj;
-                  
+
                }
             }
-  
+
             // The curl at a specific node is calculated by taking half the dot product
             // of the edges opposite to the node with the current-density of the
             // elements subtended by the node, multiplied by a consistent orientation.
-            // Curl constraints 
+            // Curl constraints
             for(uint n=0; n<nodes.size(); n++) {
-               
+
                // Curl of divergence-free current
                vRHS1[nodes.size() + n] = nodes[n].parameters[ionosphereParameters::SOURCE];
 
                // Curl of curl-free current
                vRHS2[nodes.size() + n] = 0;
-               
+
                for(uint32_t elLocalIndex=0; elLocalIndex<nodes[n].numTouchingElements; elLocalIndex++) {
                   SphericalTriGrid::Element& element = elements[nodes[n].touchingElements[elLocalIndex]];
 
-                  // Find the two other nodes on this element 
+                  // Find the two other nodes on this element
                   int gridI=0,gridJ=0;
                   int localC=0,localI=0,localJ=0;
                   for(int c=0; c< 3; c++) {
@@ -1497,14 +1501,14 @@ namespace SBC {
                         gridI=element.corners[localI];
                         localJ = (c+2)%3;
                         gridJ=element.corners[localJ];
-                        break; 
+                        break;
                      }
                   }
 
                   Eigen::Vector3d normal = elementNormal( nodes[n].touchingElements[elLocalIndex]);
                   Eigen::Vector3d ri(nodes[gridI].x.data());
                   Eigen::Vector3d rj(nodes[gridJ].x.data());
-                  Eigen::Vector3d rm(nodes[n].x.data()); 
+                  Eigen::Vector3d rm(nodes[n].x.data());
 
                   Eigen::Vector3d edgemi = (ri - rm) / (ri - rm).norm();
                   edgemi = Eigen::Quaterniond::FromTwoVectors(normal, Eigen::Vector3d::UnitZ()).toRotationMatrix() * edgemi;
@@ -1534,12 +1538,12 @@ namespace SBC {
 
 
             curlSolverMatrix.makeCompressed();
-            
+
             // Solve curl-free currents.
             Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<Real>> solver;
             solver.compute(curlSolverMatrix);
             vJ = solver.solve(vRHS2);
-            
+
             elementCurlFreeCurrent.resize(elements.size());
             elementDivFreeCurrent.resize(elements.size());
             for(uint el=0; el<elements.size(); el++) {
@@ -1559,7 +1563,7 @@ namespace SBC {
                // Note: The coefficients want to be looked up in A/km, so we multiply by 1000
                Real correction = pow(c4H(MLT)/c4P(MLT) * 1000*elementCurlFreeCurrent[el].norm(),1./(1.+c5P(MLT)-c5H(MLT))) / (1000*elementCurlFreeCurrent[el].norm());
                elementCorrectionFactors[el] = correction;
-            } 
+            }
 
             // Apply correction to RHS for divergence-free current density (vRHS1)
             // Interpolate from elements to nodes via proportion of dual polygon contained
@@ -1575,8 +1579,8 @@ namespace SBC {
                }
                correction /= totalA;
 
-               //vRHS1[nodes.size()+n] = vRHS1[nodes.size()+n]*correction; 
-            }  
+               //vRHS1[nodes.size()+n] = vRHS1[nodes.size()+n]*correction;
+            }
 
             // Solve divergence-free system
             vJ = solver.solve(vRHS1);
@@ -1621,12 +1625,12 @@ namespace SBC {
                nodes[n].parameters[ionosphereParameters::SIGMAH] = SigmaH;
             }
 
-            
+
             // Perform distance transform on the mesh
             // Here we have, as temporary variables:
             // ZZPARAM -> index of closest node (so far)
-            // PPARAM -> distance to boundary 
-	         // cout << nodes[0].openFieldLine << endl;
+            // PPARAM -> distance to boundary
+                 // cout << nodes[0].openFieldLine << endl;
             for(int n=0; n<nodes.size(); n++) {
                if(nodes[n].openFieldLine == FieldTracing::TracingLineEndType::CLOSED) {
                   nodes[n].parameters[ionosphereParameters::ZZPARAM] = n;
@@ -1694,7 +1698,7 @@ namespace SBC {
                   nodes[n].parameters[ionosphereParameters::SIGMAP] *= exp(-alpha);
                   nodes[n].parameters[ionosphereParameters::SIGMAH] *= exp(-alpha);
                }
-				
+
                // Tabulated chapman function for atmospheric absorption of EUV values, from Laundal et al. 2024
                const static Real chapman_euv_table[1201] = {
                   1.00000e+00, 9.99998e-01, 9.99994e-01, 9.99986e-01, 9.99976e-01, 9.99962e-01, 9.99946e-01, 9.99926e-01, 9.99904e-01, 9.99878e-01,
@@ -1855,12 +1859,37 @@ namespace SBC {
 
                Real SigmaP = nodes[n].parameters[ionosphereParameters::SIGMAP];
                Real SigmaH = nodes[n].parameters[ionosphereParameters::SIGMAH];
-      
+
                nodes[n].parameters[ionosphereParameters::SIGMAP] = sqrt(SigmaP*SigmaP + sigmaP_dayside*sigmaP_dayside +0.625*0.625);
                nodes[n].parameters[ionosphereParameters::SIGMAH] = sqrt(SigmaH*SigmaH + sigmaH_dayside*sigmaH_dayside +0.894*0.894);
-               
+
                // TODO: We could instead directly calculate element conductivities using Whitney forms
                // and don't need to go via sigma averaging here.
+               static const char epsilon[3][3][3] = {
+                  {{0,0,0},{0,0,1},{0,-1,0}},
+                  {{0,0,-1},{0,0,0},{1,0,0}},
+                  {{0,1,0},{-1,0,0},{0,0,0}}
+               };
+
+               Eigen::Vector3d b(nodes[n].x.data());
+               b.normalized();
+               if(nodes[n].x[2] >= 0) {
+                  b *= -1;
+               }
+               for(int i=0; i<3; i++) {
+                  for(int j=0; j<3; j++) {
+                     nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] = SigmaP * (((i==j)? 1. : 0.) - b[i]*b[j]);
+                     for(int k=0; k<3; k++) {
+                        nodes[n].parameters[ionosphereParameters::SIGMA + i*3 + j] -= SigmaH * epsilon[i][j][k]*b[k];
+                     }
+                  }
+               }
+            }
+         } else if(ionosphereGrid.ionizationModel == FixedSigma) {
+            for(uint n=0; n<nodes.size(); n++) {
+               Real SigmaP = nodes[n].parameters[ionosphereParameters::SIGMAP] = Ionosphere::fixedSigmaP;
+               Real SigmaH = nodes[n].parameters[ionosphereParameters::SIGMAH] = Ionosphere::fixedSigmaH;
+
                static const char epsilon[3][3][3] = {
                   {{0,0,0},{0,0,1},{0,-1,0}},
                   {{0,0,-1},{0,0,0},{1,0,0}},
@@ -2941,7 +2970,7 @@ namespace SBC {
 
 
 
-         for(uint m=0; m<nodes[n].numDepNodes; m++) { 
+         for(uint m=0; m<nodes[n].numDepNodes; m++) {
 
             potentialSolverMatrix.insert(n, nodes[n].dependingNodes[m]) = nodes[n].dependingCoeffs[m];
 
@@ -2955,17 +2984,17 @@ namespace SBC {
 
       // gettimeofday(&tStart, NULL);
 
-      potentialSolverMatrix.makeCompressed(); 
+      potentialSolverMatrix.makeCompressed();
 
       Eigen::BiCGSTAB<Eigen::SparseMatrix<Real> > solver;
 
       solver.compute(potentialSolverMatrix);
 
-      vPhi = solver.solve(vRightHand); 
+      vPhi = solver.solve(vRightHand);
 
-      for(uint n=0; n<nodes.size(); n++) { 
+      for(uint n=0; n<nodes.size(); n++) {
 
-         nodes[n].parameters[ionosphereParameters::SOLUTION] = vPhi[n]; 
+         nodes[n].parameters[ionosphereParameters::SOLUTION] = vPhi[n];
 
       }
 
@@ -3458,10 +3487,12 @@ namespace SBC {
       Readparameters::addComposing("ionosphere.refineMaxLatitude", "Refine the grid equatorwards of the given latitude. Multiple of these lines can be given for successive refinement, paired up with refineMinLatitude lines.");
       Readparameters::add("ionosphere.atmosphericModelFile", "Filename to read the MSIS atmosphere data from (default: NRLMSIS.dat)", std::string("NRLMSIS.dat"));
       Readparameters::add("ionosphere.recombAlpha", "Ionospheric recombination parameter (m^3/s)", 2.4e-13); // Default value from Schunck & Nagy, Table 8.5
-      Readparameters::add("ionosphere.ionizationModel", "Ionospheric electron production rate model. Options are: Rees1963, Rees1989, SergienkoIvanov (default), Robinson2020.", std::string("SergienkoIvanov"));
+      Readparameters::add("ionosphere.ionizationModel", "Ionospheric electron production rate model. Options are: Rees1963, Rees1989, SergienkoIvanov (default), FixedSigma, Robinson2020, Juusola2025.", std::string("SergienkoIvanov"));
       Readparameters::add("ionosphere.innerBoundaryVDFmode", "Inner boundary VDF construction method. Options ar: FixedMoments, AverageMoments, AverageAllMoments, CopyAndLosscone.", std::string("FixedMoments"));
       Readparameters::add("ionosphere.F10_7", "Solar 10.7 cm radio flux (sfu = 10^{-22} W/m^2)", 100);
       Readparameters::add("ionosphere.backgroundIonisation", "Background ionoisation due to cosmic rays (mho)", 0.5);
+      Readparameters::add("ionosphere.fixedSigmaP", "Fixed Pedersen conductivity value for the whole shell, if ionizationModel is 'fixedSigma'", 10.);
+      Readparameters::add("ionosphere.fixedSigmaH", "Fixed Hall conductivity value for the whole shell, if ionizationModel is 'fixedSigma'", 0.);
       Readparameters::add("ionosphere.solverMaxIterations", "Maximum number of iterations for the conjugate gradient solver", 2000);
       Readparameters::add("ionosphere.solverRelativeL2ConvergenceThreshold", "Convergence threshold for the relative L2 metric", 1e-6);
       Readparameters::add("ionosphere.solverMaxFailureCount", "Maximum number of iterations allowed to diverge before restarting the ionosphere solver", 5);
@@ -3584,12 +3615,16 @@ namespace SBC {
          ionosphereGrid.ionizationModel = SphericalTriGrid::Robinson2020;
       } else if (ionizationModelString == "Juusola2025") {
          ionosphereGrid.ionizationModel = SphericalTriGrid::Juusola2025;
+      } else if (ionizationModelString == "FixedSigma") {
+         ionosphereGrid.ionizationModel = SphericalTriGrid::FixedSigma;
       } else {
          cerr << "(IONOSPHERE) Unknown ionization production model \"" << ionizationModelString << "\". Aborting." << endl;
          abort();
       }
       Readparameters::get("ionosphere.F10_7",F10_7);
       Readparameters::get("ionosphere.backgroundIonisation",backgroundIonisation);
+      Readparameters::get("ionosphere.fixedSigmaP", fixedSigmaP);
+      Readparameters::get("ionosphere.fixedSigmaH", fixedSigmaH);
 
       for(uint i=0; i< getObjectWrapper().particleSpecies.size(); i++) {
         const std::string& pop = getObjectWrapper().particleSpecies[i].name;

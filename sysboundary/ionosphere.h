@@ -163,6 +163,7 @@ namespace SBC {
          SergienkoIvanov, // Sergienko & Ivanov (1993)
          Robinson2020, // Robinson et al (2020)
          Juusola2025,  // Juusola et al (2025)
+         FixedSigma, // Simple, homogeneous, fixed SigmaP and SigmaH values, for testing
       } ionizationModel;
 
       // Ionisation production table
@@ -392,18 +393,18 @@ namespace SBC {
 
                         Eigen::Vector3d a(nodes[corner1].x.data());
                         Eigen::Vector3d b(nodes[corner2].x.data());
-                                 
+
                         Eigen::Vector3d midpoint = (a + b) / 2.;
                         return midpoint;
                   }
                }
-            }  
-         }  
+            }
+         }
       }
 
       Real dualPolygonArea(uint gridNode){
          Real A = 0.;
-         
+
          for(uint i = 0; i < nodes[gridNode].numTouchingElements; i++){
             uint32_t gridEl = nodes[gridNode].touchingElements[i];
             Eigen::Vector3d nodePosition(nodes[gridNode].x.data());
@@ -677,6 +678,8 @@ namespace SBC {
          Ridley,   // Or like the Ridley 2004 paper (with 1000 mho longitudinal conductivity)
          Koskinen  // Like Koskinen's 2001 "Physics of Space Storms" book suggests
       } conductivityModel;
+      static Real fixedSigmaP; /*!< For the fixedSigma conductivity model */
+      static Real fixedSigmaH;
 
       void generateTemplateCell(Project &project);
       void setCellFromTemplate(SpatialCell* cell,const uint popID);
@@ -697,6 +700,7 @@ namespace SBC {
       Real earthAngularVelocity; /*!< Earth rotation vector, in radians/s */
       Real plasmapauseL; /*!< L-Value at which the plasma pause resides (everything inside corotates) */
       std::string atmosphericModelFile; /*!< MSIS data file */
+
       // Boundaries of refinement latitude bands
       std::vector<Real> refineMinLatitudes;
       std::vector<Real> refineMaxLatitudes;
