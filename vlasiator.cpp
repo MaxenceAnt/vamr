@@ -1110,7 +1110,11 @@ int simulate(int argn,char* args[]) {
          if (refineNow || (!dtIsChanged && P::adaptRefinement && P::tstep % (P::rebalanceInterval * P::refineCadence) == 0 && P::t > P::refineAfter)) { 
             logFile << "(AMR): Adapting refinement!"  << endl << writeVerbose;
             refineNow = false;
-            if (!adaptRefinement(mpiGrid, technicalGrid, sysBoundaryContainer, *project)) {
+
+            initializeRefinement(mpiGrid, technicalGrid, sysBoundaryContainer, *project);
+
+            // Check dummied out since we never seem to hit it
+            if (true) {
                // OOM, rebalance and try again
                logFile << "(LB) AMR rebalancing with heavier refinement weights." << endl;
                globalflags::bailingOut = false; // Reset this
@@ -1120,9 +1124,11 @@ int simulate(int argn,char* args[]) {
                balanceLoad(mpiGrid, sysBoundaryContainer, technicalGrid);
                // We can /= 8.0 now as cells have potentially migrated. Go back to block-based count for now.
                for (auto id : mpiGrid.get_local_cells_to_refine()) {
-                  mpiGrid[id]->parameters[CellParams::LBWEIGHTCOUNTER] = 0;
+                  SpatialCell* cell = mpiGrid[id];
+                  cell->parameters[CellParams::LBWEIGHTCOUNTER] = 0;
                   for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
-                     mpiGrid[id]->parameters[CellParams::LBWEIGHTCOUNTER] += mpiGrid[id]->get_number_of_velocity_blocks(popID);
+                     // TODO define weighting of non/sysboundary cells in one place and replace this stupid ternary
+                     cell->parameters[CellParams::LBWEIGHTCOUNTER] += (cell->sysBoundaryFlag == sysboundarytype::NOT_SYSBOUNDARY ? 3.0 : 0.5) * mpiGrid[id]->get_number_of_velocity_blocks(popID);
                   }
                }
 
