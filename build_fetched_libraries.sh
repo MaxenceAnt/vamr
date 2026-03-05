@@ -24,7 +24,7 @@ cd library-build
 # Some platforms allow for nice parallel builds.
 if [[ $PLATFORM == "-pioneer" ]]; then
    PARALLEL=64
-elif [[ $PLATFORM == "-hile_cpu" || $PLATFORM == "-hile_gpu" || $PLATFORM == "-lumi_2403" ]]; then
+elif [[ $PLATFORM == "-hile_cpu" || $PLATFORM == "-hile_gpu" || $PLATFORM == "-lumi_2403" || $PLATFORM == "-carrington" ]]; then
    PARALLEL=128
 else
    # Otherwise we are friendly to other users and limit our parallelism
@@ -121,6 +121,8 @@ mkdir zoltan-build
 cd zoltan-build
 if [[ $PLATFORM == "-pioneer" ]]; then
     ../Zoltan/configure --prefix=$WORKSPACE/libraries${PLATFORM} --enable-mpi --with-mpi-compilers --with-gnumake --with-id-type=ullong --host=riscv64-unknown-linux-gnu --build=arm-linux-gnu
+elif [[ $PLATFORM == "-arm64" ]]; then
+    ../Zoltan/configure --prefix=$WORKSPACE/libraries${PLATFORM} --enable-mpi --with-mpi-compilers --with-gnumake --with-id-type=ullong --build=arm-linux-gnu --host=arm-linux-gnu CC=mpicc CXX=mpic++
 elif [[ $PLATFORM == "-appleM1" || $PLATFORM == "-meluxina" ]]; then
     ../Zoltan/configure --prefix=$WORKSPACE/libraries${PLATFORM} --enable-mpi --with-mpi-compilers --with-gnumake --with-id-type=ullong CC=mpicc CXX=mpic++
 elif [[ $PLATFORM == "-leonardo_dcgp_intel" ]]; then
@@ -142,7 +144,7 @@ make -j $PARALLEL && make install
 cd ..
 
 # Build boost (only if system module is not available)
-if [[ $PLATFORM == "-leonardo_booster" || $PLATFORM == "-leonardo_dcgp" || $PLATFORM == "-karolina_cuda" || $PLATFORM == "-karolina_gcc" || $PLATFORM == "-ukkogpu" ||  $PLATFORM == "-mahti_gcc_build" ]]; then
+if [[ $PLATFORM == "-hile_gpu" || $PLATFORM == "-leonardo_booster" || $PLATFORM == "-leonardo_dcgp" || $PLATFORM == "-karolina_cuda" || $PLATFORM == "-karolina_gcc" || $PLATFORM == "-ukkogpu" ||  $PLATFORM == "-mahti_gcc_build" ]]; then
     # echo "### Downloading boost. ###"
     # wget -q https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.gz
     # echo "### Extracting boost. ###"

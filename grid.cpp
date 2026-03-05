@@ -336,6 +336,12 @@ void initializeGrids(
    phiprof::Timer setBTimer {"project.setProjectBField"};
    project.setProjectBField(perBGrid, BgBGrid, technicalGrid);
    setBTimer.stop();
+   if (P::isRestart) {
+      // There are projects that have non-uniform and non-zero perturbed B, e.g. Magnetosphere with dipole type 4.
+      // If restarting with reapplyUponRestart active, we need to set PerB again 
+      // in boundary cells after setProjectBField has populated the BGBXVDCORR etc. terms
+      sysBoundaries.applyInitialState(mpiGrid, technicalGrid, perBGrid, BgBGrid, project);
+   }
    phiprof::Timer fsGridGhostTimer {"fsgrid-ghost-updates"};
    perBGrid.updateGhostCells();
    BgBGrid.updateGhostCells();
@@ -723,6 +729,7 @@ void balanceLoad(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, S
    // deallocates first if necessary
    phiprof::Timer gpuAllocationsTimer("GPU LB set buffer allocations");
    gpu_vlasov_allocate(gpuMaxBlockCount);
+   gpu_calculateProbeAllocation(gpuMaxBlockCount);
    gpu_acc_allocate(gpuMaxBlockCount);
    gpuAllocationsTimer.stop();
 #endif // end USE_GPU
