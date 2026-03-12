@@ -18,11 +18,11 @@
 create_verification_files=0
 
 # folder for all reference data 
-reference_dir="/proj/group/spacephysics/vlasiator_testpackage/"
+reference_dir="/turso/group/spacephysics/vlasiator/testpackage/"
 cd $SLURM_SUBMIT_DIR
 
 bin="/proj/USERNAME/BINARYNAME"
-diffbin="/proj/group/spacephysics/vlasiator_testpackage/vlsvdiff_DP_carrington"
+diffbin="/turso/group/spacephysics/vlasiator/testpackage/vlsvdiff_DP_carrington"
 
 #compare agains which revision
 #reference_revision="CI_reference"

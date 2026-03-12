@@ -27,7 +27,7 @@
 create_verification_files=0
 
 # folder for all reference data
-reference_dir="/proj/group/spacephysics/vlasiator_testpackage/"
+reference_dir="/turso/group/spacephysics/vlasiator/testpackage/"
 cd $SLURM_SUBMIT_DIR
 
 #compare agains which revision
