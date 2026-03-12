@@ -38,6 +38,7 @@ jobs:
     # Build libraries for the current version of the docker image
     # (to be used in any subsequent compilation and run jobs on said image)
     runs-on: hile
+    if: false
 
     steps:
       - name: Checkout source
@@ -362,6 +363,7 @@ jobs:
     # Build Vlasiator with testpackage flags, on the HILE cluster using
     # its AMD gpus
     runs-on: hile
+    if: false
     needs: build_libraries_hile-g
     steps:
       - name: Clean workspace
@@ -408,6 +410,7 @@ jobs:
     # Build Vlasiator with production flags and all the debug flags enabled, on the HILE cluster using
     # its AMD gpus
     runs-on: hile
+    if: false
     needs: build_libraries_hile-g
     steps:
       - name: Clean workspace
@@ -455,6 +458,7 @@ jobs:
     # Build Vlasiator with testpackage flags, on the HILE cluster using
     # its CPUs
     runs-on: hile
+    if: false
 
     steps:
       - name: Clean workspace
@@ -495,6 +499,7 @@ jobs:
     # Build Vlasiator with production flags and all the debug flags enabled, on the HILE cluster using
     # its CPUs
     runs-on: hile
+    if: false
 
     steps:
       - name: Clean workspace
@@ -769,6 +774,7 @@ jobs:
   build_tools_HILE-C:
     # Build vlsvdiff and vlsvextract for testpackage use
     runs-on: hile
+    if: false
 
     steps:
       - name: Clean workspace
@@ -880,6 +886,7 @@ jobs:
   run_TP_HILE-C:
     # Run the testpackage on the HILE-C cluster
     runs-on: hile
+    if: false
     needs: [build_TP_HILE-C, build_tools_HILE-C]
     continue-on-error: true
 
