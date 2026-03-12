@@ -11,6 +11,7 @@ jobs:
     # Build Vlasiator with testpackage flags, on the HILE cluster using
     # its CPUs
     runs-on: hile
+    if: false
 
     steps:
       - name: Clean workspace
@@ -49,6 +50,7 @@ jobs:
   run_TP_HILE-C:
     # Run the testpackage on the HILE-C cluster
     runs-on: hile
+    if: false
     needs: [build_TP_HILE-C] # tools included in build tp
     continue-on-error: true
 
