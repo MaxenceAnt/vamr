@@ -2,7 +2,7 @@
 #SBATCH -t 01:30:00        # Run time (hh:mm:ss)
 #SBATCH --job-name=ctestpackage
 ##SBATCH -A spacephysics 
-#SBATCH -M carrington
+#SBATCH --constraint="carrington"
 # test short medium 20min1d 3d
 #SBATCH -p short
 #SBATCH --exclusive
@@ -11,7 +11,6 @@
 #SBATCH -n 16                  # number of tasks
 #SBATCH --mem-per-cpu=5G
 #SBATCH --hint=multithread
-##SBATCH -x carrington-[801-808]
 
 # If 1, the reference vlsv files are generated
 # if 0 then we check the v1 against reference files

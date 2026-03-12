@@ -1,10 +1,9 @@
 #!/bin/bash
 #SBATCH -t 01:30:00        # Run time (hh:mm:ss)
 #SBATCH --job-name=TP_ukko_a100
-#SBATCH -M ukko
 #SBATCH -p gpu
 ##SBATCH -p gpu-oversub # Oversub affinities can be whatever
-#SBATCH --constraint=a100
+#SBATCH --constraint="ukko&a100"
 #SBATCH --gres=gpu:1
 ##SBATCH --cpus-per-gpu=8
 #SBATCH --hint=nomultithread
