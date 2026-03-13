@@ -31,17 +31,16 @@ jobs:
     - uses: ursg/gcc-problem-matcher@master
     - name: Build libraries
       run: |
-        set -e   # Abort on error
         WORKSPACE=`pwd`
-        BUILDDIR=`mktemp -d "${TMPDIR:-/tmp}/vlasiator-library-build-XXXXX"`
-        ln -s $BUILDDIR library-build
+        rm -rf library-build
+        mkdir -p library-build
+        BUILDDIR=library-build
         bash ./fetch_libraries.sh ukkogpu
-        srun --constraint="v100" --gres="gpu:V100" -pgpu --job-name CI_ref_build_lib --interactive --nodes=1 -n 1 -c 8 --mem-per-cpu=2G -t 0:20:0 bash -c 'module purge; ml OpenMPI/4.1.6.withucx-GCC-13.2.0 PAPI/7.1.0-GCCcore-13.2.0 CUDA/12.6.0; export VLASIATOR_ARCH=ukko_dgx; ./build_fetched_libraries.sh ukkogpu; sleep 10s'
+        srun --constraint="v100" --gres="gpu:V100" -pgpu --job-name CI_ref_build_lib --interactive --nodes=1 -n 1 -c 8 --mem-per-cpu=2G -t 0:20:0 bash -c 'set -e; module purge; ml OpenMPI/4.1.6.withucx-GCC-13.2.0 PAPI/7.1.0-GCCcore-13.2.0 CUDA/12.6.0; export VLASIATOR_ARCH=ukko_dgx; ./build_fetched_libraries.sh ukkogpu'
         rm -rf $BUILDDIR
     - name: Compile vlasiator (Testpackage build w/ CUDA) and fluxfunction
       run: |
-        set -e   # Abort on error
-        srun --constraint="v100" --gres="gpu:V100" -pgpu --job-name CI_tp_compile --interactive --nodes=1 -n 1 -c 8 --mem-per-cpu=2G -t 0:20:0 bash -c 'module purge; ml OpenMPI/4.1.6.withucx-GCC-13.2.0 PAPI/7.1.0-GCCcore-13.2.0 CUDA/12.6.0; export VLASIATOR_ARCH=ukko_dgx; make -j 9 testpackage fluxfunction; sleep 10s'
+        srun --constraint="v100" --gres="gpu:V100" -pgpu --job-name CI_tp_compile --interactive --nodes=1 -n 1 -c 8 --mem-per-cpu=2G -t 0:20:0 bash -c 'set -e; module purge; ml OpenMPI/4.1.6.withucx-GCC-13.2.0 PAPI/7.1.0-GCCcore-13.2.0 CUDA/12.6.0; export VLASIATOR_ARCH=ukko_dgx; make -j 9 testpackage fluxfunction; sleep 10s'
     - name: Make sure the output binary is visible in lustre
       uses: nick-fields/retry@v3
       with:
