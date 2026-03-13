@@ -29,6 +29,15 @@ jobs:
     - name: Make clean
       run: VLASIATOR_ARCH=carrington_gcc_openmpi make clean
     - uses: ursg/gcc-problem-matcher@master
+    - name: Build libraries
+      run: |
+        set -e   # Abort on error
+        WORKSPACE=`pwd`
+        BUILDDIR=`mktemp -d "${TMPDIR:-/tmp}/vlasiator-library-build-XXXXX"`
+        ln -s $BUILDDIR library-build
+        bash ./fetch_libraries.sh carrington
+        srun --constraint="carrington" --job-name CI_ref_build_lib --interactive --nodes=1 -n 1 -c 16 --mem=40G -p short -t 0:10:0 bash -c 'module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; export VLASIATOR_ARCH=carrington_gcc_openmpi; ./build_fetched_libraries.sh carrington'
+        rm -rf $BUILDDIR
     - name: Compile vlasiator (Testpackage build) and fluxfunction
       run: |
         srun --constraint="carrington" --job-name CI_ref_tp_compile --interactive --nodes=1 -n 1 -c 16 --mem=40G -p short -t 0:10:0 bash -c 'module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; export VLASIATOR_ARCH=carrington_gcc_openmpi; make -j 16 testpackage fluxfunction; sleep 10s'
