@@ -40,6 +40,7 @@ jobs:
         rm -rf $BUILDDIR
     - name: Compile vlasiator (Testpackage build w/ CUDA) and fluxfunction
       run: |
+        set -e   # Abort on error
         srun --constraint="v100" --gres="gpu:V100" -pgpu --job-name CI_tp_compile --interactive --nodes=1 -n 1 -c 8 --mem-per-cpu=2G -t 0:20:0 bash -c 'module purge; ml OpenMPI/4.1.6.withucx-GCC-13.2.0 PAPI/7.1.0-GCCcore-13.2.0 CUDA/12.6.0; export VLASIATOR_ARCH=ukko_dgx; make -j 9 testpackage fluxfunction; sleep 10s'
     - name: Make sure the output binary is visible in lustre
       uses: nick-fields/retry@v3
