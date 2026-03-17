@@ -16,12 +16,15 @@ cd library-build
 
 # Phiprof
 git clone https://github.com/fmihpc/phiprof/
+git checkout 605a7247c85d967fe22fe079c96c817b461c92b1
 
 # VLSV
 if [[ $PLATFORM != "-appleM1" ]]; then
    git clone https://github.com/fmihpc/vlsv.git
+   git checkout 0d06db7078ee7066f69180b559c506c4cb0d7f1b
 else
    git clone -b appleM1Build https://github.com/ursg/vlsv.git
+   git checkout 0d06db7078ee7066f69180b559c506c4cb0d7f1b
 fi
 
 # PAPI
@@ -29,6 +32,7 @@ if [[ $PLATFORM != "-arriesgado" && $PLATFORM != "-appleM1" && $PLATFORM != "-uk
     # This fails on RISCV and MacOS
     # Mahti, LUMI, UkkoGPU and HILE use system module
     git clone https://github.com/icl-utk-edu/papi
+    git checkout 25a278ee5f4ccc9a2263e90ff8c15a1a58b2b7ed
 fi
 
 # jemalloc (not for GPU versions, on Mahti use system module)
@@ -39,6 +43,7 @@ fi
 
 # Zoltan
 git clone https://github.com/sandialabs/Zoltan.git
+git checkout 721acf15b2ee3a4b74d49730c3ff2c96aed9c2f7
 
 # Boost (only if system module not available)
 if [[ $PLATFORM == "-hile_gpu" || $PLATFORM == "-leonardo_booster" || $PLATFORM == "-leonardo_dcgp" || $PLATFORM == "-karolina_cuda" || $PLATFORM == "-karolina_gcc" || $PLATFORM == "-ukkogpu" || $PLATFORM == "-mahti_gcc_build" || $PLATFORM == "-frankenstein_hopper2_cuda" ]]; then
