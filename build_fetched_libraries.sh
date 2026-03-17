@@ -154,7 +154,9 @@ if [[ $PLATFORM == "-hile_gpu" || $PLATFORM == "-leonardo_booster" || $PLATFORM 
     echo "### Building boost. ###"
     cd boost_1_86_0
     ./bootstrap.sh --with-libraries=program_options --prefix=$WORKSPACE/libraries${PLATFORM} stage
-    echo "using mpi ;" >> ./tools/build/src/user-config.jam
+    if [[ $PLATFORM != "-hile_gpu" ]]; then
+      echo "using mpi ;" >> ./tools/build/src/user-config.jam
+    fi
     ./b2
     echo "### Installing boost. ###"
     ./b2 --prefix=$WORKSPACE/libraries${PLATFORM} install > /dev/null
