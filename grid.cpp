@@ -1339,7 +1339,8 @@ void mapRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
    timer.stop();
 }
 
-bool initializeRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, FsGrid<fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid, SysBoundary& sysBoundaries, Project& project, int useStatic) {
+bool adaptRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, FsGrid<fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid, SysBoundary& sysBoundaries, Project& project, int useStatic) {
+   phiprof::Timer amrTimer {"Re-refine spatial cells"};
    uint64_t refines {0};
    if (useStatic > -1) {
       project.forceRefinement(mpiGrid, useStatic);
@@ -1397,12 +1398,7 @@ bool initializeRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& m
    MPI_Allreduce(&(globalflags::bailingOut), &bailout, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
    bailoutAllreduceTimer.stop();
 
-   return !bailout;
-}
-
-bool adaptRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, FsGrid<fsgrids::technical, FS_STENCIL_WIDTH> & technicalGrid, SysBoundary& sysBoundaries, Project& project, int useStatic) {
-   phiprof::Timer amrTimer {"Re-refine spatial cells"};
-   if (!initializeRefinement(mpiGrid, technicalGrid, sysBoundaries, project, useStatic)) {
+   if (bailout) {
       return false;
    }
 
@@ -1447,6 +1443,7 @@ bool adaptRefinement(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGri
    phiprof::Timer finishTimer {"finish refining"};
    mpiGrid.finish_refining();
    finishTimer.stop();
+   dccrgTimer.stop();
 
    memory_purge(); // Purge jemalloc allocator to actually release memory
 
