@@ -40,7 +40,7 @@ if [[ $PLATFORM != "-arriesgado" && $PLATFORM != "-appleM1" && $PLATFORM != "-uk
     git clone https://github.com/icl-utk-edu/papi
     cd papi
     git checkout 25a278ee5f4ccc9a2263e90ff8c15a1a58b2b7ed
-    cd --
+    cd ..
 fi
 
 # jemalloc (not for GPU versions, on Mahti use system module)
@@ -52,7 +52,7 @@ fi
 # Zoltan
 git clone https://github.com/sandialabs/Zoltan.git
 cd Zoltan
-git checkout 721acf15b2ee3a4b74d49730c3ff2c96aed9c2f7
+git checkout f6361719dd66cac62db8dbed120704e436a5ee81
 cd ..
 
 # Boost (only if system module not available)
