@@ -481,7 +481,7 @@ void setFaceNeighborRanks( dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
    }
 }
 
-inline int get_transfer_part(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, uint64_t num_part_transfers, CellID cell)
+inline uint64_t get_transfer_part(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid, uint64_t num_part_transfers, CellID cell)
 {
    // Siblings transfer in same part
    return (mpiGrid.mapping.get_refinement_level(cell) ? mpiGrid.mapping.get_parent(cell) : cell) % num_part_transfers;
