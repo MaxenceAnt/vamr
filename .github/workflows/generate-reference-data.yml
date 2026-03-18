@@ -16,8 +16,8 @@ jobs:
     - name: Clean workspace
       run: |
         RUN_STRING=$( cat << MORO
-        rm -rf libraries library-build testpackage
-        rm -f libraries.tar.zst testpackage_check_description.txt testpackage-output.tar.gz metrics.txt stdout.txt stderr.txt testpackage_output_variables.txt
+        rm -rf libraries-carrington library-build testpackage
+        rm -f libraries-binaries-carrington.tar.gz testpackage_check_description.txt testpackage-output.tar.gz metrics.txt stdout.txt stderr.txt testpackage_output_variables.txt
         rm -f *.xml
         MORO
         )
@@ -48,13 +48,13 @@ jobs:
         max_attempts: 3
         retry_on: error
         command: ls vlasiator
+    - name: Pack libraries and binaries
+      run: tar -zcf libraries-binaries-carrington.tar.gz libraries-carrington/ vlasiator fluxfunction
     - name: Upload testpackage binary
       uses: actions/upload-artifact@v4
       with:
-        name: vlasiator-testpackage
-        path: |
-          vlasiator
-          fluxfunction
+        name: vlasiator-reference-testpackage
+        path: libraries-binaries-carrington.tar.gz
         if-no-files-found: error
     #- name: Upload build log
     #  uses: actions/upload-artifact@v3
@@ -72,10 +72,16 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: false
+    - name: Clean libraries
+      run: |
+        rm -rf libraries-carrington
+        rm -f libraries-binaries-carrington.tar.gz
     - name: Download testpackage binary
       uses: actions/download-artifact@v4
       with:
-        name: vlasiator-testpackage
+        name: vlasiator-reference-testpackage
+    - name: Unpack libraries and binaries
+      run: tar -zxf libraries-binaries-carrington.tar.gz
     - name: Run testpackage
       id: run
       run: |
