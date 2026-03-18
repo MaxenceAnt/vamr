@@ -53,7 +53,7 @@ jobs:
     - name: Upload testpackage binary
       uses: actions/upload-artifact@v4
       with:
-        name: vlasiator-testpackage
+        name: vlasiator-reference-testpackage
         path: |
           vlasiator
           fluxfunction
@@ -82,7 +82,7 @@ jobs:
     - name: Download testpackage binary
       uses: actions/download-artifact@v4
       with:
-        name: vlasiator-testpackage
+        name: vlasiator-reference-testpackage
     - name: Run testpackage
       id: run
       run: |
