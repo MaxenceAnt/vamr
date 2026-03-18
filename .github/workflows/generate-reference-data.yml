@@ -55,6 +55,7 @@ jobs:
         path: |
           vlasiator
           fluxfunction
+          libraries-carrington
         if-no-files-found: error
     #- name: Upload build log
     #  uses: actions/upload-artifact@v3
