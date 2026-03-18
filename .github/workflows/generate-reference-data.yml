@@ -83,10 +83,11 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: vlasiator-reference-testpackage
+    - name: Unpack libraries
+      run: tar -zxf libraries-carrington.tar.gz
     - name: Run testpackage
       id: run
       run: |
-        tar -zxf libraries-carrington.tar.gz
         chmod +x $GITHUB_WORKSPACE/vlasiator
         cd testpackage
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$GITHUB_WORKSPACE/libraries-carrington/lib
