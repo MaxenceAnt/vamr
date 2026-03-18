@@ -93,6 +93,7 @@ jobs:
         srun --job-name fluxtest --constraint="carrington" -N 1 -c 1 --mem=1G bash -c "module purge; ml GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 PMIx/4.2.6-GCCcore-13.2.0 PAPI/7.1.0-GCCcore-13.2.0  Boost/1.83.0-GCC-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_small/bulk.0000001.vlsv equatorial.bin"
         srun --job-name fluxtest --constraint="carrington" -N 1 -c 1 --mem=1G bash -c "module purge; ml GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 PMIx/4.2.6-GCCcore-13.2.0 PAPI/7.1.0-GCCcore-13.2.0  Boost/1.83.0-GCC-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_polar_small/bulk.0000001.vlsv polar.bin"
         chmod 775 polar.bin equatorial.bin
-        cp equatorial.bin polar.bin $REFERENCE_REVISION
+        cp equatorial.bin $REFERENCE_REVISION
+        cp polar.bin $REFERENCE_REVISION
         # No longer overwrites files in $reference_dir/CI_reference/ but places in proper folder
     # We don't bother to create artefacts or anything here.
