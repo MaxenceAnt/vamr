@@ -16,8 +16,8 @@ jobs:
     - name: Clean workspace
       run: |
         RUN_STRING=$( cat << MORO
-        rm -rf libraries library-build testpackage
-        rm -f libraries.tar.zst testpackage_check_description.txt testpackage-output.tar.gz metrics.txt stdout.txt stderr.txt testpackage_output_variables.txt
+        rm -rf libraries-carrington library-build testpackage
+        rm -f libraries-carrington.tar.zst testpackage_check_description.txt testpackage-output.tar.gz metrics.txt stdout.txt stderr.txt testpackage_output_variables.txt
         rm -f *.xml
         MORO
         )
@@ -48,6 +48,8 @@ jobs:
         max_attempts: 3
         retry_on: error
         command: ls vlasiator
+    - name: Pack libraries
+      run: tar -zcf libraries-carrington.tar.gz libraries-carrington/
     - name: Upload testpackage binary
       uses: actions/upload-artifact@v4
       with:
@@ -55,7 +57,7 @@ jobs:
         path: |
           vlasiator
           fluxfunction
-          libraries-carrington
+          libraries-carrington.tar.gz
         if-no-files-found: error
     #- name: Upload build log
     #  uses: actions/upload-artifact@v3
@@ -73,6 +75,10 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: false
+    - name: Clean libraries
+      run: |
+        rm -rf libraries-carrington
+        rm -f libraries-carrington.tar.gz
     - name: Download testpackage binary
       uses: actions/download-artifact@v4
       with:
@@ -80,6 +86,7 @@ jobs:
     - name: Run testpackage
       id: run
       run: |
+        tar -zxf libraries-carrington.tar.gz
         chmod +x $GITHUB_WORKSPACE/vlasiator
         cd testpackage
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$GITHUB_WORKSPACE/libraries-carrington/lib
