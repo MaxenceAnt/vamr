@@ -850,7 +850,7 @@ jobs:
         tar -czf testpackage-output.tar.gz testpackage_check_description.txt testpackage_output_variables.txt
         MORO
         )
-        srun --job-name CI_package_results --constraint "carrington|ukko" -N 1 -c 1 --mem=1G bash -c "$PARSE_OUTPUT_CMD"
+        srun --job-name CI_package_results --constraint "carrington|ukko" -N 1 -c 1 --mem=3G bash -c "$PARSE_OUTPUT_CMD"
         if [ -f $GITHUB_WORKSPACE/testpackage_failed ]; then
           # Fail this step if any test failed.
           exit 1
