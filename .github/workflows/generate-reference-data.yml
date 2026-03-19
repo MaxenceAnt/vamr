@@ -95,6 +95,7 @@ jobs:
         cat testpackage_run_output.txt
     - name: Generate reference fluxfunction files
       run: |
+        echo "Generating fluxfunction files for revision $REFERENCE_REVISION"
         chmod +x $GITHUB_WORKSPACE/fluxfunction
         srun --job-name fluxtest --constraint="carrington" -N 1 -c 1 --mem=1G bash -c "module purge; ml GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 PMIx/4.2.6-GCCcore-13.2.0 PAPI/7.1.0-GCCcore-13.2.0  Boost/1.83.0-GCC-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_small/bulk.0000001.vlsv equatorial.bin"
         srun --job-name fluxtest --constraint="carrington" -N 1 -c 1 --mem=1G bash -c "module purge; ml GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 PMIx/4.2.6-GCCcore-13.2.0 PAPI/7.1.0-GCCcore-13.2.0  Boost/1.83.0-GCC-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_polar_small/bulk.0000001.vlsv polar.bin"
