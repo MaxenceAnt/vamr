@@ -9,7 +9,7 @@
 #SBATCH -n 16                  # number of tasks
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=ci-emails.946c413b11d28e58c3a9bfb73173246b.show-sender@streams.zulipchat.com
-##SBATCH --mem-per-cpu=6G
+#SBATCH --mem-per-cpu=5G
 ##SBATCH -x carrington-[801-808]
 
 # If 1, the reference vlsv files are generated
