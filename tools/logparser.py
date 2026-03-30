@@ -1,8 +1,20 @@
 import re
 import os
+import argparse
+
+
+parser = argparse.ArgumentParser(
+    prog="Logparser",
+    description="For pruning restarts from the logfile such that the latest successful timestep is left in the log",
+)
+parser.add_argument("logfile", type=str)
+parser.add_argument("outputfile", type=str)
+args = parser.parse_args()
+input = args.logfile
+output = args.outputfile
 
 logdict = {}
-with open("/home/lassejsc/Downloads/logfile.txt", "r") as logfile:
+with open(input, "r") as logfile:
     loglines = logfile.readlines()
     iterator = iter(loglines)
     n = 0
@@ -33,7 +45,7 @@ with open("/home/lassejsc/Downloads/logfile.txt", "r") as logfile:
             break
     logfile.close()
 
-with open("./test.txt", "w") as fileoutput:
+with open(output, "w") as fileoutput:
     for lines in logdict.values():
         for line in lines:
             fileoutput.write(line)
