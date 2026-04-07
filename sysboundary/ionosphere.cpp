@@ -428,7 +428,7 @@ namespace SBC {
                   abort();
                }
                Element newElement;
-               newElement.corners = std::array<uint32_t,3>{vertexIndices[0], vertexIndices[1], vertexIndices[2]};
+               newElement.corners = std::array<uint32_t,3>{(uint32_t) vertexIndices[0], (uint32_t) vertexIndices[1], (uint32_t) vertexIndices[2]};
                elements.push_back(newElement);
                getline(fi, line);
             }
@@ -490,7 +490,7 @@ namespace SBC {
             std::vector<Real> coords;
             stringstream pss(line);
             string points;
-            int size;
+            unsigned int size;
             string type;
 
             if(!(pss >> points >> size >> type)){
@@ -524,7 +524,7 @@ namespace SBC {
             }
 
 
-            for(int i = 0; i < coords.size(); i+=3){
+            for(unsigned int i = 0; i < coords.size(); i+=3){
                Node newNode;
                newNode.x = {coords[i], coords[i+1], coords[i+2]};
                normalizeRadius(newNode, Ionosphere::innerRadius);
@@ -539,8 +539,8 @@ namespace SBC {
          if(!fi.eof()){
             stringstream css(line);
             string cells;
-            int cellNum;
-            int size;
+            unsigned int cellNum;
+            unsigned int size;
 
             if(!(css >> cells >> cellNum >> size)){
                cerr << "(IONOSPHERE) Could not read CELLS field \"" << line << "\"" << " in " << pathString << endl;
@@ -561,14 +561,14 @@ namespace SBC {
                return c == ' ' || isdigit(c);
             })){
                stringstream css(line);
-               int t, a, b, c;
+               unsigned int t, a, b, c;
                while(css >> t >> a >> b >> c){
                   if(!(t == 3)){
                      cerr << "(IONOSPHERE) Non-triangular cell encountered, \"" << line << "\" in " << pathString << endl;
                      abort();
                   }
                   for(int v : {a, b, c}){
-                     if(v < 0 || v >= nodes.size()){
+                     if(v < 0 || (unsigned int) v >= nodes.size()){
                         cerr << "(IONOSPHERE) Error vertex number out of bounds, " << v << " in \"" << line << "\" in " << pathString << endl;
                         abort();
                      }
@@ -1296,13 +1296,13 @@ namespace SBC {
             // product is taken
             if(Eigen::loadMarket(curlSolverMatrix, "ionosphereSolverMatrix")){
 
-               for(int n =0; n < nodes.size(); n++) {
+               for(unsigned int n =0; n < nodes.size(); n++) {
                   vRHS1[n] = 0;
                   vRHS2[n] = nodes[n].parameters[ionosphereParameters::SOURCE];
 
                }
 
-               for(int n = 0; n < nodes.size(); n++) {
+               for(unsigned int n = 0; n < nodes.size(); n++) {
                   vRHS1[n + nodes.size()] = ionosphereGrid.nodes[n].parameters[ionosphereParameters::SOURCE];
                   vRHS2[n + nodes.size()] = 0;
 
@@ -1523,7 +1523,7 @@ namespace SBC {
             // ZZPARAM -> index of closest node (so far)
             // PPARAM -> distance to boundary
                  // cout << nodes[0].openFieldLine << endl;
-            for(int n=0; n<nodes.size(); n++) {
+            for(unsigned int n=0; n<nodes.size(); n++) {
                if(nodes[n].openFieldLine == FieldTracing::TracingLineEndType::CLOSED) {
                   nodes[n].parameters[ionosphereParameters::ZZPARAM] = n;
                   nodes[n].parameters[ionosphereParameters::PPARAM] = 0;
@@ -1536,16 +1536,16 @@ namespace SBC {
             bool done=false;
             while(!done) {
                done = true;
-               for(int n=0; n<nodes.size(); n++) {
+               for(unsigned int n=0; n<nodes.size(); n++) {
                   if(nodes[n].openFieldLine == FieldTracing::TracingLineEndType::CLOSED) {
                      continue; // Skip closed nodes
                   }
                   Eigen::Vector3d x(nodes[n].x.data());
 
-                  for(int m=0; m<nodes[n].numTouchingElements; m++) {
+                  for(unsigned int m=0; m<nodes[n].numTouchingElements; m++) {
                      SphericalTriGrid::Element& element = elements[nodes[n].touchingElements[m]];
                      for(int c=0; c<3; c++) {
-                        int i = element.corners[c];
+                        unsigned int i = element.corners[c];
                         if(i == n) {
                            continue;
                         }
@@ -1582,7 +1582,7 @@ namespace SBC {
             }
 
             #pragma omp parallel for
-            for(int n=0; n<nodes.size(); n++) {
+            for(unsigned int n=0; n<nodes.size(); n++) {
 
                // Adjust sigmas based on distance value
                if(nodes[n].parameters[ionosphereParameters::PPARAM] > 300e3) { // TODO: Hardcoded 300km here

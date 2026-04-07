@@ -400,6 +400,9 @@ namespace SBC {
                }
             }
          }
+
+        // We should never end up here.
+        return {0,0,0};
       }
 
       Real dualPolygonArea(uint gridNode){
