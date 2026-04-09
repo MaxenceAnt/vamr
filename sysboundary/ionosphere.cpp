@@ -1632,7 +1632,7 @@ namespace SBC {
 
                // TODO: We could instead directly calculate element conductivities using Whitney forms
                // and don't need to go via sigma averaging here.
-               static const char epsilon[3][3][3] = {
+               static const int epsilon[3][3][3] = {
                   {{0,0,0},{0,0,1},{0,-1,0}},
                   {{0,0,-1},{0,0,0},{1,0,0}},
                   {{0,1,0},{-1,0,0},{0,0,0}}
@@ -1657,7 +1657,7 @@ namespace SBC {
                Real SigmaP = nodes[n].parameters[ionosphereParameters::SIGMAP] = Ionosphere::fixedSigmaP;
                Real SigmaH = nodes[n].parameters[ionosphereParameters::SIGMAH] = Ionosphere::fixedSigmaH;
 
-               static const char epsilon[3][3][3] = {
+               static const int epsilon[3][3][3] = {
                   {{0,0,0},{0,0,1},{0,-1,0}},
                   {{0,0,-1},{0,0,0},{1,0,0}},
                   {{0,1,0},{-1,0,0},{0,0,0}}
