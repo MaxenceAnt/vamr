@@ -468,10 +468,13 @@ void calculateAcceleration(const uint popID,const uint globalMaxSubcycles,const 
       still needs to consider has_content lists for spatial neighbours.
       The last subcycle adjustment is performed in a higher level function, and it
       performs a full neighbour block list update, and is called for all accelerated cells.
+      If callef for all accelerated cells, this will cause a bug for multipopulation has we
+      keep some of the velocity block information from the previous pop in the loop.
+      This has been replace by a adjustVelocityBlocks on all the cells in the other calculateAcceleration.
    **/
-   if (step < (globalMaxSubcycles - 1)) {
-      adjustVelocityBlocks(mpiGrid, acceleratedCells, false, popID);
-   }
+   //     if (step < (globalMaxSubcycles - 1)) {
+   //   adjustVelocityBlocks(mpiGrid, acceleratedCells, false, popID);
+   // }
 }
 
 /** Accelerate all particle populations to new time t+dt.
@@ -558,10 +561,13 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
             }
             // Accelerate population over one subcycle step
             calculateAcceleration(popID,(uint)globalMaxSubcycles,step,mpiGrid,acceleratedCells,dt);
+	         //Over all the cells to take into account the neighboor for the mulitpop.
+	         adjustVelocityBlocks(mpiGrid, cells, true, popID);
          } // for-loop over acceleration substeps
 
          // final adjust for all cells, also updating full remote block lists
-         adjustVelocityBlocks(mpiGrid, cells, true, popID);
+        // Moved because already in the previous loop
+	 //    adjustVelocityBlocks(mpiGrid, cells, true, popID);
       } // for-loop over particle species
    }
 
