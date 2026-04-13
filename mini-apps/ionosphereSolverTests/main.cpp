@@ -184,7 +184,9 @@ Eigen::Vector3d getCommonEdgeMidpoint(SphericalTriGrid& grid, uint32_t el1, uint
             }
          }
       }  
-   }  
+   }
+   // This should not happen
+   return {0,0,0};
 }
 
 Real getDualPolygonArea(SphericalTriGrid& grid, uint gridNode){
@@ -449,6 +451,58 @@ Eigen::Vector3d whitneyInterpolate(SphericalTriGrid& grid, uint32_t el, std::vec
    return o1*edgeLength[e1]*edgeValue[e1] * w1(barycentre) + o2*edgeLength[e2]*edgeValue[e2] * w2(barycentre) + o3*edgeLength[e3]*edgeValue[e3] *w3(barycentre);
 }
 
+// Calculate neighbor's Barycentre and dual polygon - edge - intersection point.
+std::tuple<Eigen::Vector3d, Eigen::Vector3d> connectingSegmentLengths(SphericalTriGrid& grid, uint32_t el1, uint32_t el2) {
+  SphericalTriGrid::Element& element1 = grid.elements[el1];
+  SphericalTriGrid::Element& element2 = grid.elements[el2];
+
+  Eigen::Vector3d barycentre1 = getElementBarycentre(grid,el1);
+  Eigen::Vector3d barycentre2 = getElementBarycentre(grid,el2);
+
+  // Get common edge to these two elements
+  for(uint i=0; i<3; i++) {
+    if(element1.corners[i] == element2.corners[0] ||
+        element1.corners[i] == element2.corners[1] ||
+        element1.corners[i] == element2.corners[2]) {
+      for(uint j=0; j<3; j++) {
+        if(i != j && (element1.corners[j] == element2.corners[0] ||
+              element1.corners[j] == element2.corners[1] ||
+              element1.corners[j] == element2.corners[2])) {
+
+          uint corner1 = element1.corners[i];
+          uint corner2 = element1.corners[j];
+
+          Eigen::Vector3d normal1 = getElementNormal(grid,el1);
+          Eigen::Vector3d normal2 = getElementNormal(grid,el2);
+
+          Eigen::Vector3d rotatedBarycentre2 =  Eigen::Vector3d(grid.nodes[corner1].x.data()) +
+            Eigen::Quaternion<Real>::FromTwoVectors(normal2, normal1).toRotationMatrix() *
+            (barycentre2 - Eigen::Vector3d(grid.nodes[corner1].x.data()));
+
+          Eigen::Vector3d corner1Position(grid.nodes[corner1].x.data());
+          Eigen::Vector3d corner2Position(grid.nodes[corner2].x.data());
+
+          Eigen::Vector3d barycentre1ToBarycentre2 = (rotatedBarycentre2 - barycentre1).normalized();
+          Eigen::Vector3d corner1ToCorner2 = (corner2Position - corner1Position).normalized();
+
+          // Get intersection of line between barycenters and line between corners
+          Eigen::Matrix<double, 3, 2> A;
+          A.col(0) = barycentre1ToBarycentre2;
+          A.col(1) = - corner1ToCorner2;
+          Eigen::Vector3d b = corner1Position - barycentre1;
+          Eigen::Vector2d t = A.colPivHouseholderQr().solve(b);
+          Eigen::Vector3d intersection = barycentre1 + t(0) * barycentre1ToBarycentre2;
+
+          return std::make_tuple(barycentre2, intersection);
+        }
+      }
+    }
+  }
+
+  // Not found, something went bananas.
+  abort();
+}
+
 // Interpolate edge-based quantity to nodes, by bisecting the node in coordinate-orthohonal planes and calculating the fluxes through those planes
 Eigen::Vector3d interpolateEdgeToNode(SphericalTriGrid& grid, uint32_t n, std::vector<Real> edgeValue) {
 
@@ -479,8 +533,8 @@ Eigen::Vector3d interpolateEdgeToNode(SphericalTriGrid& grid, uint32_t n, std::v
       int32_t otherElementi = grid.findElementNeighbour(elementn, cn, ci);
       int32_t otherElementj = grid.findElementNeighbour(elementn, cn, cj);
 
-      auto [barycentrei,intersectioni] = getConnectingSegmentLengths(ionosphereGrid, elementn, otherElementi);
-      auto [barycentrej,intersectionj] = getConnectingSegmentLengths(ionosphereGrid, elementn, otherElementj);
+      auto [barycentrei,intersectioni] = connectingSegmentLengths(ionosphereGrid, elementn, otherElementi);
+      auto [barycentrej,intersectionj] = connectingSegmentLengths(ionosphereGrid, elementn, otherElementj);
 
       Eigen::Vector3d barycentren = getElementBarycentre(ionosphereGrid, elementn);
       auto [e,orientation] = getEdgeIndexOrientation(n,i);
@@ -790,7 +844,6 @@ int main(int argc, char** argv) {
          double theta = acos(nodes[n].x[2] / sqrt(nodes[n].x[0]*nodes[n].x[0] + nodes[n].x[1]*nodes[n].x[1] + nodes[n].x[2]*nodes[n].x[2])); // Latitude
          double phi = atan2(nodes[n].x[0], nodes[n].x[1]); // Longitude
 
-         Real area = getDualPolygonArea(ionosphereGrid, n);
          Real area = getDualPolygonArea(ionosphereGrid, n);
          nodes[n].parameters[ionosphereParameters::SOURCE] = sph_legendre(1,0,theta) * cos(0*phi) * area;
       }
@@ -1186,10 +1239,6 @@ int main(int argc, char** argv) {
       }
 
       curlSolverMatrix.makeCompressed();
-      if(ionosphereGrid.nodes.size() < 200) {
-         Eigen::MatrixXd tempMatrix = curlSolverMatrix;
-         inverseSolverMatrix = tempMatrix.inverse();
-      }
 
       if(writeSolverMatrix) {
          ofstream matrixOut("JSolverMatrix.txt");
@@ -1234,12 +1283,10 @@ int main(int argc, char** argv) {
          Eigen::Vector3d r1(ionosphereGrid.nodes[corners[1]].x.data());
          Eigen::Vector3d r2(ionosphereGrid.nodes[corners[2]].x.data());
 
-         Eigen::Vector3d barycentre = (r0+r1+r2)/3.;
-
+         Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
          Eigen::Vector3d rotatedVJ = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), barycentre.normalized()).toRotationMatrix() * Eigen::Vector3d(vJ[2*el], vJ[2*el+1], 0);
          elementCurlFreeCurrent[el] = rotatedVJ;
 
-         Eigen::Vector3d barycentre = getElementBarycentre(ionosphereGrid, el);
          Real MLT = atan2(barycentre[1], barycentre[0]) * 12 / M_PI + 12;
 
          // Note: The coefficients want to be looked up in A/km, so we multiply by 1000
@@ -1293,7 +1340,7 @@ int main(int argc, char** argv) {
       // Next, evaluate Sigma as a function of inplane-J and MLT
       #pragma omp parallel for
       for(uint n=0; n < nodes.size(); n++) {
-         Eigen::Vector3d J=interpolateEdgeToNode(ionosphereGrid, n, edgeJCurl);
+         Eigen::Vector3d J{0,0,0};
          Eigen::Vector3d x(nodes[n].x.data());
 
          Real totalA=0;
@@ -1328,7 +1375,7 @@ int main(int argc, char** argv) {
       // ZZPARAM -> index of closest node (so far)
       // PPARAM -> distance to boundary
       std::cerr << "Distance transform!" << std::endl << "["; 
-      for(int n=0; n<nodes.size(); n++) {
+      for(uint n=0; n<nodes.size(); n++) {
          if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
             nodes[n].parameters[ionosphereParameters::ZZPARAM] = n;
             nodes[n].parameters[ionosphereParameters::PPARAM] = 0;
@@ -1341,16 +1388,16 @@ int main(int argc, char** argv) {
       bool done=false;
       while(!done) {
          done = true;
-         for(int n=0; n<nodes.size(); n++) {
+         for(uint n=0; n<nodes.size(); n++) {
             if(nodes[n].parameters[ionosphereParameters::ZPARAM] < 1.5) {
                continue; // Skip closed nodes
             }
             Eigen::Vector3d x(nodes[n].x.data());
 
-            for(int m=0; m<nodes[n].numTouchingElements; m++) {
+            for(uint m=0; m<nodes[n].numTouchingElements; m++) {
                SphericalTriGrid::Element& element = ionosphereGrid.elements[nodes[n].touchingElements[m]];
                for(int c=0; c<3; c++) {
-                  int i = element.corners[c];
+                  uint i = element.corners[c];
                   if(i == n) {
                      continue;
                   }
@@ -1388,7 +1435,7 @@ int main(int argc, char** argv) {
       std::cerr << "]\nDistance transform done!" << std::endl;
 
       #pragma omp parallel for
-      for(int n=0; n<nodes.size(); n++) {
+      for(uint n=0; n<nodes.size(); n++) {
 
          // Adjust sigmas based on distance value
          if(nodes[n].parameters[ionosphereParameters::PPARAM] > 300e3) { // TODO: Hardcoded 300km here
@@ -1449,12 +1496,12 @@ int main(int argc, char** argv) {
          meshOut << "ASCII" << endl;
          meshOut << "DATASET UNSTRUCTURED_GRID" << endl;
          meshOut << "POINTS " << ionosphereGrid.nodes.size() << " double" << endl;
-         for(int n = 0; n < ionosphereGrid.nodes.size(); n++){
+         for(uint n = 0; n < ionosphereGrid.nodes.size(); n++){
             Eigen::Vector3d pos(ionosphereGrid.nodes[n].x.data());
             meshOut << fixed << pos(0) << " " << pos(1) << " " << pos(2) << endl;
          }
          meshOut << "CELLS " << ionosphereGrid.elements.size() << " " << 4*ionosphereGrid.elements.size() << endl;
-         for(int el = 0; el < ionosphereGrid.elements.size(); el++){
+         for(uint el = 0; el < ionosphereGrid.elements.size(); el++){
             // Order of vertices in face definition defines face normal
             std::array<uint32_t, 3>& corners = ionosphereGrid.elements[el].corners;
             Eigen::Vector3d normal = getElementNormal(ionosphereGrid, el); 
@@ -1477,23 +1524,23 @@ int main(int argc, char** argv) {
             }
          }
          meshOut << "CELL_TYPES " << ionosphereGrid.elements.size() << endl;
-         for(int el = 0; el < ionosphereGrid.elements.size(); el++){
+         for(uint el = 0; el < ionosphereGrid.elements.size(); el++){
             meshOut << 5 << endl;
          }
          meshOut << "POINT_DATA " << ionosphereGrid.nodes.size() << endl;
          meshOut << "SCALARS node_id int 1" << endl;
          meshOut << "LOOKUP_TABLE default" << endl;
-         for(int n = 0; n < ionosphereGrid.nodes.size(); n++){
+         for(uint n = 0; n < ionosphereGrid.nodes.size(); n++){
             meshOut << n << endl;
          }
          meshOut << "CELL_DATA " << ionosphereGrid.elements.size() << endl;
          meshOut << "SCALARS face_id int 1" << endl;
          meshOut << "LOOKUP_TABLE default" << endl;
-         for(int el = 0; el < ionosphereGrid.elements.size(); el++){
+         for(uint el = 0; el < ionosphereGrid.elements.size(); el++){
             meshOut << el << endl;
          } 
          meshOut << "NORMALS normals double" << endl;
-         for(int el = 0; el < ionosphereGrid.elements.size(); el++){
+         for(uint el = 0; el < ionosphereGrid.elements.size(); el++){
             Eigen::Vector3d normal = getElementNormal(ionosphereGrid, el).normalized();
             meshOut << normal(0) << " " << normal(1) << " " << normal(2) << endl;
          }
@@ -1949,8 +1996,8 @@ int main(int argc, char** argv) {
       //      }
       //      return retval;
       //}));
-      outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_dualPolygonArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
-            std::vector<Real> retval(grid.nodes.size());
+      //outputDROs.addOperator(new DRO::DataReductionOperatorIonosphereNode("ig_dualPolygonArea", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+      //      std::vector<Real> retval(grid.nodes.size());
 
       //      for(uint n=0; n<grid.nodes.size(); n++) {
       //         Real dualPolygonArea = 0;
