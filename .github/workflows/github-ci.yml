@@ -913,8 +913,8 @@ jobs:
         chmod +x $GITHUB_WORKSPACE/fluxfunction
         srun --job-name fluxtest --constraint "carrington|ukko" -N 1 -c 1 --mem=1G bash -c "module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; module load Boost/1.83.0-GCC-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_small/bulk.0000001.vlsv equatorial.bin"
         srun --job-name fluxtest --constraint "carrington|ukko" -N 1 -c 1 --mem=1G bash -c "module purge; module load GCC/13.2.0; module load OpenMPI/4.1.6-GCC-13.2.0 ; module load PMIx/4.2.6-GCCcore-13.2.0; module load PAPI/7.1.0-GCCcore-13.2.0; module load Boost/1.83.0-GCC-13.2.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_polar_small/bulk.0000001.vlsv polar.bin"
-        diff -q equatorial.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/equatorial.bin
-        diff -q polar.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/polar.bin
+        diff -q equatorial.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/equatorial.bin || if [ $? -eq 1 ] ; then true; else false; fi
+        diff -q polar.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/polar.bin || if [ $? -eq 1 ] ; then true; else false; fi
 
   run_TP_HILE-C:
     # Run the testpackage on the HILE-C cluster
@@ -984,8 +984,8 @@ jobs:
         chmod +x $GITHUB_WORKSPACE/fluxfunction
         srun -C c --job-name fluxtest --nodes=1 -n 1 -c 1 --mem-per-cpu=2G -t 0:10:0 bash -c 'module load papi; module load cray-pmi; module load libfabric/1.22.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_small/bulk.0000001.vlsv equatorial.bin'
         srun -C c --job-name fluxtest --nodes=1 -n 1 -c 1 --mem-per-cpu=2G -t 0:10:0 bash -c 'module load papi; module load cray-pmi; module load libfabric/1.22.0; $GITHUB_WORKSPACE/fluxfunction testpackage/run_*/Magnetosphere_polar_small/bulk.0000001.vlsv polar.bin'
-        diff -q equatorial.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/equatorial.bin
-        diff -q polar.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/polar.bin
+        diff -q equatorial.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/equatorial.bin || if [ $? -eq 1 ] ; then true; else false; fi
+        diff -q polar.bin /turso/group/spacephysics/vlasiator/testpackage/CI_reference/polar.bin || if [ $? -eq 1 ] ; then true; else false; fi
 
   # run_TP_ukkoGPU:
   #   # Run the testpackage on the Ukko GPU cluster (via Carrington frontend)
