@@ -12,7 +12,7 @@ do
   fi
 done
 
-declare -a file_check=("\w+.md" "INSTALL" "CITATION.cff" "Doxyfile." "\bdoc/")
+declare -a file_check=("\w+.md" "INSTALL" "CITATION.cff" "Doxyfile." "\bdoc/" "\b.vscode/" "\bdoxytmp/" "\bscaling/" "\bvisit_variables/")
 declare -i allowed_count=0
 
 #checking if only allowed files are changed. 
