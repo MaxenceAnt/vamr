@@ -52,7 +52,7 @@ try:
             c = Ainv[j,i]
             #ax.text(i, j, "%1.1f"%(c), va='center', ha='center', size="2")
 except:
-    print("Inversion failed! Matrix signular?")
+    print("Inversion failed! Matrix singular?")
 
 # Calc eigenvalues
 λ,ev=numpy.linalg.eig(0.5*(A + numpy.transpose(A)))
