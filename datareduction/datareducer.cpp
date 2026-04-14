@@ -3107,64 +3107,48 @@ void initializeDataReducers(DataReducer * outputReducer, DataReducer * diagnosti
          }
       }
       if(P::systemWriteAllDROs || lowercase == "ig_jfromdivj") {
-	      outputReducer->addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromDivJ", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+        outputReducer->addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromDivJ", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-				      std::vector<Real> retval(3*grid.elements.size());
-
-
-				      for(uint el=0; el<grid.elementDivFreeCurrent.size(); el++) {
-        				      Eigen::Vector3d J = grid.elementDivFreeCurrent[el];
+              std::vector<Real> retval(3*grid.elements.size());
 
 
-	  			              retval[3*el] = J[0];
-				              retval[3*el+1] = J[1];
-				              retval[3*el+2] = J[2];
-				      }
+              for(uint el=0; el<grid.elementDivFreeCurrent.size(); el++) {
+                 Eigen::Vector3d J = grid.elementDivFreeCurrent[el];
+                 retval[3*el] = J[0];
+                 retval[3*el+1] = J[1];
+                 retval[3*el+2] = J[2];
+              }
 
+              return retval;
 
+        }));
 
-				      return retval;
-
-	      }));
-
-
-                  if(!P::systemWriteAllDROs) {
-
-                     continue;
-
-                  }
+        outputReducer->addMetadata(outputReducer->size()-1, "A", "$\\mathrm{A}$", "$J_{\\text{divJ}}$", "1.0");
+        if(!P::systemWriteAllDROs) {
+          continue;
+        }
       }
+
       if(P::systemWriteAllDROs || lowercase == "ig_jfromcurlj") {
-	      outputReducer->addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromCurlJ", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
+        outputReducer->addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_jFromCurlJ", [&](SBC::SphericalTriGrid& grid)->std::vector<Real> {
 
-				      std::vector<Real> retval(3*grid.elements.size());
+              std::vector<Real> retval(3*grid.elements.size());
 
+              for(uint el=0; el<grid.elementCurlFreeCurrent.size(); el++) {
+                 Eigen::Vector3d J = grid.elementCurlFreeCurrent[el];
+                 retval[3*el] = J[0];
+                 retval[3*el+1] = J[1];
+                 retval[3*el+2] = J[2];
+               }
 
-				      for(uint el=0; el<grid.elementCurlFreeCurrent.size(); el++) {
-        			         Eigen::Vector3d J = grid.elementCurlFreeCurrent[el];
+               return retval;
+        }));
 
-
-	  			         retval[3*el] = J[0];
-				         retval[3*el+1] = J[1];
-				         retval[3*el+2] = J[2];
-				      }
-
-
-
-				      return retval;
-	      }));
-
-
-                  if(!P::systemWriteAllDROs) {
-
-                     continue;
-
-                  }
+        outputReducer->addMetadata(outputReducer->size()-1, "A", "$\\mathrm{A}$", "$J_{\\text{curlJ}}$", "1.0");
+        if(!P::systemWriteAllDROs) {
+          continue;
+        }
       }
-
-
-
-
 
       if(P::systemWriteAllDROs || lowercase == "ig_inplanecurrent") {
          outputReducer->addOperator(new DRO::DataReductionOperatorIonosphereElement("ig_inplanecurrent", [](
