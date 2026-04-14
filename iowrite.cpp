@@ -633,6 +633,61 @@ bool writeDomainSizes( Writer & vlsvWriter,
 }
 
 
+/*! Writes domain extents into the vlsv file, so a box that contains all the cells in this process
+ \param vlsvWriter Some vlsv writer with a file open
+ \param meshName Name of the mesh (SpatialGrid used in the writeGrid function)
+ \param local_cells Cells that are local to current process
+ \param mpiGrid Vlaisator's MPI grid
+ \return Returns true if operation was successful
+ */
+
+bool writeDomainExtents(Writer& vlsvWriter, const string& meshName, const std::vector<CellID>& local_cells,
+                        const dccrg::Dccrg<SpatialCell, dccrg::Cartesian_Geometry>& mpiGrid) {
+   vector<CellID>::const_iterator it;
+
+   // Write the array:
+   map<string, string> xmlAttributes;
+   // Put the meshName
+   xmlAttributes["mesh"] = meshName;
+   //Get the first cell in domain as a base for comparing against
+   const SpatialCell& firstCell = *mpiGrid[*local_cells.begin()]; 
+   Real ret[6] = {
+       firstCell.parameters[CellParams::XCRD], firstCell.parameters[CellParams::XCRD] + firstCell.parameters[CellParams::DX],
+       firstCell.parameters[CellParams::YCRD], firstCell.parameters[CellParams::YCRD] + firstCell.parameters[CellParams::DY],
+       firstCell.parameters[CellParams::ZCRD], firstCell.parameters[CellParams::ZCRD] + firstCell.parameters[CellParams::DZ],
+   };
+   //Loop through the domain cells and find a box that bounds all the cells
+   for (it = local_cells.begin() + 1; it != local_cells.end(); it++) {
+      CellID cellId = *it;
+
+      const SpatialCell& cell = *mpiGrid[cellId];
+      Real lowcorner[6] = {
+          cell.parameters[CellParams::XCRD], cell.parameters[CellParams::XCRD] + cell.parameters[CellParams::DX],
+          cell.parameters[CellParams::YCRD], cell.parameters[CellParams::YCRD] + cell.parameters[CellParams::DY],
+          cell.parameters[CellParams::ZCRD], cell.parameters[CellParams::ZCRD] + cell.parameters[CellParams::DZ],
+      };
+      for (uint8_t i = 0; i != 6; i++) {
+         //min
+         if ((lowcorner[i] < ret[i]) && (i % 2 == 0)) {
+            ret[i] = lowcorner[i];
+         //max
+         } else if ((lowcorner[i] > ret[i]) && (i % 2 != 0)) {
+            ret[i] = lowcorner[i];
+         }
+      }
+   }
+   const unsigned int arraySize = 1;
+   const unsigned int vectorSize = 6;
+
+   // Write the mesh extents, ret corresponds to [xmin,xmax,ymin,ymax,zmin,zmax] 
+   if (vlsvWriter.writeArray("MESH_DOMAIN_EXTENTS",xmlAttributes,arraySize,vectorSize,ret) == false){
+       cerr << "Error at: " << __FILE__ << " " << __LINE__ << ", FAILED TO WRITE MESH_DOMAIN_EXTENTS" << endl;
+       logFile << "(MAIN) writeGrid: ERROR FAILED TO WRITE MESH_DOMAIN_EXTENTS AT: " << __FILE__ << " " << __LINE__ <<
+       endl << writeVerbose; return false;
+   }
+
+   return true;
+}
 
 /*! Writes the zone global id numbers into the file. The vlsv file needs to know in which order the local cells + ghost cells are written. Local cells are first appended to a vector called global ids, after which the ghost cells are appended. The global ids vector will then be saved into a vlsv file
  \param mpiGrid Vlasiator's MPI grid
@@ -1447,7 +1502,10 @@ bool writeGrid(
    if( writeDomainSizes( vlsvWriter, meshName, local_cells.size(), ghost_cells.size() ) == false ) {
       return false;
    }
-
+   //Write domain extents
+   if( writeDomainExtents( vlsvWriter, meshName, local_cells, mpiGrid ) == false ) {
+      return false;
+   }
    //Update local ids for cells:
    if( updateLocalIds( mpiGrid, local_cells, MPI_COMM_WORLD ) == false ) {
       return false;
@@ -1678,7 +1736,10 @@ bool writeRestart(
 
    //Write domain sizes:
    if( writeDomainSizes( vlsvWriter, meshName, local_cells.size(), ghost_cells.size() ) == false ) return false;
-
+   
+   //Write domain extents
+   if( writeDomainExtents( vlsvWriter, meshName, local_cells, mpiGrid ) == false )  return false;
+  
    //Write FSGrid metadata
    if( writeFsGridMetadata( technicalGrid, vlsvWriter, true ) == false ) return false;
    
