@@ -589,9 +589,9 @@ namespace DRO {
    // and VariablePTensorOffDiagonal (23, 13, 12)
    VariablePTensorDiagonal::VariablePTensorDiagonal(cuint _popID): DataReductionOperator(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
-       if (P::activateVamr) {
-       popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
-     }
+      if (P::activateVamr) {
+        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+      }
    }
    VariablePTensorDiagonal::~VariablePTensorDiagonal() { }
 
@@ -993,7 +993,7 @@ namespace DRO {
    VariableRhoNonthermal::VariableRhoNonthermal(cuint _popID): DataReductionOperator(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
       if (P::activateVamr) {
-	popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+	    popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
       }
       doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
    }
@@ -1025,7 +1025,7 @@ namespace DRO {
    VariableRhoThermal::VariableRhoThermal(cuint _popID): DataReductionOperator(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
       if (P::activateVamr) {
-	popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+	    popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
       }
       doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
    }
@@ -1059,7 +1059,7 @@ namespace DRO {
      if (P::activateVamr) {
        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
      }
-      doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
+     doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
    }
    VariableVNonthermal::~VariableVNonthermal() { }
 
@@ -1093,9 +1093,9 @@ namespace DRO {
    //v thermal:
    VariableVThermal::VariableVThermal(cuint _popID): DataReductionOperator(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
-       if (P::activateVamr) {
-       popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
-     }
+      if (P::activateVamr) {
+        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+      }
       doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
    }
    VariableVThermal::~VariableVThermal() { }
@@ -1135,9 +1135,9 @@ namespace DRO {
    // and VariablePTensorNonthermalOffDiagonal (23, 13, 12)
    VariablePTensorNonthermalDiagonal::VariablePTensorNonthermalDiagonal(cuint _popID): DataReductionOperator(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
-       if (P::activateVamr) {
-       popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
-     }
+      if (P::activateVamr) {
+        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+      }
       doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
    }
    VariablePTensorNonthermalDiagonal::~VariablePTensorNonthermalDiagonal() { }
@@ -1186,9 +1186,9 @@ namespace DRO {
    // and VariablePTensorThermalOffDiagonal (23, 13, 12)
    VariablePTensorThermalDiagonal::VariablePTensorThermalDiagonal(cuint _popID): DataReductionOperator(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
-       if (P::activateVamr) {
-       popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
-     }
+      if (P::activateVamr) {
+        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+      }
       doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
    }
    VariablePTensorThermalDiagonal::~VariablePTensorThermalDiagonal() { }
@@ -1234,7 +1234,7 @@ namespace DRO {
      if (P::activateVamr) {
        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
      }
-      doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
+     doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
    }
    VariablePTensorNonthermalOffDiagonal::~VariablePTensorNonthermalOffDiagonal() { }
 
@@ -1278,9 +1278,9 @@ namespace DRO {
 
    VariablePTensorThermalOffDiagonal::VariablePTensorThermalOffDiagonal(cuint _popID): DataReductionOperator(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
-       if (P::activateVamr) {
-       popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
-     }
+      if (P::activateVamr) {
+        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+      }
       doSkip = (getObjectWrapper().particleSpecies[popID].thermalRadius == 0.0) ? true : false;
    }
    VariablePTensorThermalOffDiagonal::~VariablePTensorThermalOffDiagonal() { }
@@ -1326,7 +1326,7 @@ namespace DRO {
 
    VariableEffectiveSparsityThreshold::VariableEffectiveSparsityThreshold(cuint _popID): DataReductionOperator(),popID(_popID) {
      popName=getObjectWrapper().particleSpecies[popID].name;
-      if (P::activateVamr) {
+     if (P::activateVamr) {
        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
      }
    }
@@ -1369,9 +1369,9 @@ namespace DRO {
     */
    VariablePrecipitationDiffFlux::VariablePrecipitationDiffFlux(cuint _popID): DataReductionOperatorHasParameters(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
-       if (P::activateVamr) {
-       popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
-     }
+      if (P::activateVamr) {
+        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+      }
       lossConeAngle = getObjectWrapper().particleSpecies[popID].precipitationLossConeAngle; // deg
       emin = getObjectWrapper().particleSpecies[popID].precipitationEmin;    // already converted to SI
       emax = getObjectWrapper().particleSpecies[popID].precipitationEmax;    // already converted to SI
@@ -1497,9 +1497,9 @@ namespace DRO {
     */
    VariableMuSpace::VariableMuSpace(cuint _popID): DataReductionOperatorHasParameters(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
-       if (P::activateVamr) {
-       popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
-     }
+      if (P::activateVamr) {
+        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+      }
       nBins = Parameters::PADmubins; //Number of bins to build muSpace
    }
    VariableMuSpace::~VariableMuSpace() { }
@@ -1590,7 +1590,7 @@ namespace DRO {
    VariablePrecipitationLineDiffFlux::VariablePrecipitationLineDiffFlux(cuint _popID): DataReductionOperatorHasParameters(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
       if (P::activateVamr) {
-	popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+	    popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
       }
       emin = getObjectWrapper().particleSpecies[popID].precipitationEmin;    // already converted to SI
       emax = getObjectWrapper().particleSpecies[popID].precipitationEmax;    // already converted to SI
@@ -1736,7 +1736,7 @@ namespace DRO {
    VariableEnergyDensity::VariableEnergyDensity(cuint _popID): DataReductionOperatorHasParameters(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
       if (P::activateVamr) {
-	popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+	    popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
       }
       // Store internally in SI units
       solarwindenergy = getObjectWrapper().particleSpecies[popID].SolarWindEnergy;
@@ -1829,9 +1829,9 @@ namespace DRO {
    // q_i = m/2 * integral((v - <V>)^2 (v - <V>)_i * f(r,v) dV)
    VariableHeatFluxVector::VariableHeatFluxVector(cuint _popID): DataReductionOperator(),popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
-       if (P::activateVamr) {
-       popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
-     }
+      if (P::activateVamr) {
+        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+      }
    }
    VariableHeatFluxVector::~VariableHeatFluxVector() { }
 
@@ -1917,9 +1917,9 @@ namespace DRO {
     */
    VariableNonMaxwellianity::VariableNonMaxwellianity(cuint _popID) : DataReductionOperator(), popID(_popID) {
       popName = getObjectWrapper().particleSpecies[popID].name;
-       if (P::activateVamr) {
-       popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
-     }
+      if (P::activateVamr) {
+        popName += std::to_string(getObjectWrapper().particleSpecies[popID].RefinementLevel);
+      }
    }
    VariableNonMaxwellianity::~VariableNonMaxwellianity() {}
 
