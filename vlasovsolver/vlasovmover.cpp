@@ -722,7 +722,7 @@ void calculateSpatialTranslation(
  * @param popID ID of the accelerated particle species.
 */
 
-uint getAccelerationSubcycles(SpatialCell* spatial_cell, Real dt, const uint popID)
+uint getAccelerationSubcycles(const SpatialCell* spatial_cell, const Real dt, const uint popID)
 {
    return max( convert<uint>(ceil(dt / spatial_cell->get_max_v_dt(popID))), 1u);
 }
@@ -807,8 +807,8 @@ void calculateAcceleration(const uint popID,const uint globalMaxSubcycles,const 
  * @param mpiGrid Parallel grid library.
  * @param dt Time step.*/
 void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& mpiGrid,
-                           Real dt
-                          ) {  
+                           const Real dt
+                          ) {
    typedef Parameters P;
    const vector<CellID>& cells = getLocalCells();
 
@@ -890,11 +890,9 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
              }
             // Accelerate population over one subcycle step
             calculateAcceleration(popID,(uint)globalMaxSubcycles,step,mpiGrid,acceleratedCells,dt);
-	    
-	    adjustVelocityBlocks(mpiGrid, cells, true, popID);
-	    if(step==0 && (uint)globalMaxSubcycles > 1){
-	      adjustVelocityBlocks(mpiGrid, cells, false, popID);
-	    }
+            if(step==0 && (uint)globalMaxSubcycles > 1){
+	            adjustVelocityBlocks(mpiGrid, cells, false, popID);
+	         }
          } // for-loop over acceleration substeps
 
          // final adjust for all cells, also updating full remote block lists
