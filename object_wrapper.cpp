@@ -135,11 +135,9 @@ bool ObjectWrapper::getPopulationParameters() {
    for(unsigned int i =0; i < getObjectWrapper().particleSpecies.size(); i++) {
 
       species::Species& species=getObjectWrapper().particleSpecies[i];
-     
       vmesh::MeshParameters& vMesh=vmesh::getMeshWrapper()->velocityMeshesCreation->at(i);
 
       const std::string& pop = species.name;
-     
 
       // Sanity check name
       if(species.name != vMesh.name) {
@@ -205,7 +203,7 @@ bool ObjectWrapper::getPopulationParameters() {
             + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "\n";
          std::cerr << errormsg;
       }
-      
+	   
       /* Special handling of WID=8; halve the number of blocks */
       int myRank;
       MPI_Comm_rank(MPI_COMM_WORLD,&myRank);
