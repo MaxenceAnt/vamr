@@ -99,55 +99,55 @@ void calculateCellMoments(spatial_cell::SpatialCell* cell,
       int Ref=0;
       int MaxRef=0;
       if(P::activateVamr) {
-	Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
-	MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
-	if(Ref < MaxRef){
-	  changeRefined(cell,popID);
-	}
-	// Calculate species' contribution to first velocity moments with Vamr
-	blockVelocityFirstMomentsVamr(blockContainer,
+	    Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
+	    MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
+	    if(Ref < MaxRef){
+	      changeRefined(cell,popID);
+	    }
+	    // Calculate species' contribution to first velocity moments with Vamr
+	    blockVelocityFirstMomentsVamr(blockContainer,
 				      array,
 				      nBlocks);
-      }else {
-	// Calculate species' contribution to first velocity moments
-	blockVelocityFirstMoments(blockContainer,
+        }else {
+	    // Calculate species' contribution to first velocity moments
+	    blockVelocityFirstMoments(blockContainer,
 				  array,
 				  nBlocks);
-      }
+        }
   
 
-      pop.RHO = array[0];
-      pop.V[0] = divideIfNonZero(array[1], array[0]);
-      pop.V[1] = divideIfNonZero(array[2], array[0]);
-      pop.V[2] = divideIfNonZero(array[3], array[0]);
+        pop.RHO = array[0];
+        pop.V[0] = divideIfNonZero(array[1], array[0]);
+        pop.V[1] = divideIfNonZero(array[2], array[0]);
+        pop.V[2] = divideIfNonZero(array[3], array[0]);
 
-      //      std::cout<< " popID  "<< popID << " a pour RHO  "<< pop.RHO <<std::endl;
-      if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
-	for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	  Population &pop2 = cell->get_population(popID2);
-	  pop.RHO += pop2.RHO;
-	  pop.V[0] += pop2.V[0];
-	  pop.V[1] += pop2.V[1];
-	  pop.V[2] += pop2.V[2];
-	};
-	for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	  Population &pop2 = cell->get_population(popID2);
-	  pop2.RHO =  pop.RHO;
-	  pop2.V[0] = pop.V[0];
-	  pop2.V[1] = pop.V[1];
-	  pop2.V[2] = pop.V[2];
-	};
-      };
+        //      std::cout<< " popID  "<< popID << " a pour RHO  "<< pop.RHO <<std::endl;
+        if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
+	      for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	        Population &pop2 = cell->get_population(popID2);
+	        pop.RHO += pop2.RHO;
+	        pop.V[0] += pop2.V[0];
+	        pop.V[1] += pop2.V[1];
+	        pop.V[2] += pop2.V[2];
+	      };
+	      for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	        Population &pop2 = cell->get_population(popID2);
+	        pop2.RHO =  pop.RHO;
+	        pop2.V[0] = pop.V[0];
+	        pop2.V[1] = pop.V[1];
+	        pop2.V[2] = pop.V[2];
+	      };
+        };
 	     
 
-      if (!computePopulationMomentsOnly) {
-         // Store species' contribution to bulk velocity moments
-         cell->parameters[CellParams::RHOM  ] += array[0]*mass;
-         cell->parameters[CellParams::VX] += array[1]*mass;
-         cell->parameters[CellParams::VY] += array[2]*mass;
-         cell->parameters[CellParams::VZ] += array[3]*mass;
-         cell->parameters[CellParams::RHOQ  ] += array[0]*charge;
-      }
+        if (!computePopulationMomentsOnly) {
+          // Store species' contribution to bulk velocity moments
+          cell->parameters[CellParams::RHOM  ] += array[0]*mass;
+          cell->parameters[CellParams::VX] += array[1]*mass;
+          cell->parameters[CellParams::VY] += array[2]*mass;
+          cell->parameters[CellParams::VZ] += array[3]*mass;
+          cell->parameters[CellParams::RHOQ  ] += array[0]*charge;
+        }
    } // for-loop over particle species
 
    if(!computePopulationMomentsOnly) {
@@ -183,18 +183,18 @@ void calculateCellMoments(spatial_cell::SpatialCell* cell,
       int Ref=0;
       int MaxRef=0;
       if(P::activateVamr) {
-	int Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
-	int MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
-	// Calculate species' contribution to second velocity moments with Vam
-	blockVelocitySecondMomentsVamr(blockContainer,
+	    int Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
+	    int MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
+	    // Calculate species' contribution to second velocity moments with Vam
+	    blockVelocitySecondMomentsVamr(blockContainer,
 				       cell->parameters[CellParams::VX],
 				       cell->parameters[CellParams::VY],
 				       cell->parameters[CellParams::VZ],
 				       array,
 				       nBlocks);
       }else{
-	// Calculate species' contribution to second velocity moments
-	blockVelocitySecondMoments(blockContainer,
+	    // Calculate species' contribution to second velocity moments
+	    blockVelocitySecondMoments(blockContainer,
 				   cell->parameters[CellParams::VX],
 				   cell->parameters[CellParams::VY],
 				   cell->parameters[CellParams::VZ],
@@ -217,18 +217,18 @@ void calculateCellMoments(spatial_cell::SpatialCell* cell,
       }
 
       if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
-	for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	  Population &pop2 = cell->get_population(popID2);
-	  for (size_t i=0; i<nMom2; ++i) {
-	    pop.P[i] +=   pop2.P[i];
-	  };
-	};
-	for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	  Population &pop2 = cell->get_population(popID2);
-	  for (size_t i=0; i<nMom2; ++i) {
-	    pop2.P[i] = pop.P[i];
-	  };
-	};
+        for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	      Population &pop2 = cell->get_population(popID2);
+	      for (size_t i=0; i<nMom2; ++i) {
+	        pop.P[i] +=   pop2.P[i];
+	      };
+	    };
+	    for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	      Population &pop2 = cell->get_population(popID2);
+	      for (size_t i=0; i<nMom2; ++i) {
+	        pop2.P[i] = pop.P[i];
+	      };
+	    };
       };
       
    } // for-loop over particle species
@@ -305,53 +305,53 @@ void calculateMoments_R(
             continue;
          }
 
-	 const Real mass = getObjectWrapper().particleSpecies[popID].mass;
+	     const Real mass = getObjectWrapper().particleSpecies[popID].mass;
          const Real charge = getObjectWrapper().particleSpecies[popID].charge;
 
          // Temporary array where the moments for this species are accumulated
          Real array[nMom1] = {0};
 	 
-	 int Ref=0;
-	 int MaxRef=0;
-	 if(P::activateVamr) {
-	   Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
-	   MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
-	   if(Ref < MaxRef){
-	     changeRefined(cell,popID);
-	   }
-	   // Calculate species' contribution to first velocity moments with Vamr
-	   blockVelocityFirstMomentsVamr(blockContainer,
+	     int Ref=0;
+	     int MaxRef=0;
+	     if(P::activateVamr) {
+	       Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
+	       MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
+	       if(Ref < MaxRef){
+	         changeRefined(cell,popID);
+	       }
+	       // Calculate species' contribution to first velocity moments with Vamr
+	       blockVelocityFirstMomentsVamr(blockContainer,
 					 array,
 					 nBlocks);
-	 }else {
-	   // Calculate species' contribution to first velocity moments
-	   blockVelocityFirstMoments(blockContainer,
+	       }else {
+	       // Calculate species' contribution to first velocity moments
+	       blockVelocityFirstMoments(blockContainer,
 				     array,
 				     nBlocks);
-	 }
+	       }
 	
-         // Store species' contribution to bulk velocity moments
-	 pop.RHO_R = array[0];
-	 pop.V_R[0] = divideIfNonZero(array[1], array[0]);
-	 pop.V_R[1] = divideIfNonZero(array[2], array[0]);
-	 pop.V_R[2] = divideIfNonZero(array[3], array[0]);
+           // Store species' contribution to bulk velocity moments
+	       pop.RHO_R = array[0];
+	       pop.V_R[0] = divideIfNonZero(array[1], array[0]);
+	       pop.V_R[1] = divideIfNonZero(array[2], array[0]);
+           pop.V_R[2] = divideIfNonZero(array[3], array[0]);
 
-	 if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
-	   for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	     Population &pop2 = cell->get_population(popID2);
-	     pop.RHO_R += pop2.RHO_R;
-	     pop.V_R[0] += pop2.V_R[0];
-	     pop.V_R[1] += pop2.V_R[1];
-	     pop.V_R[2] += pop2.V_R[2];
-	   };
-	 for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	     Population &pop2 = cell->get_population(popID2);
-	     pop2.RHO_R =  pop.RHO_R;
-	     pop2.V_R[0] = pop.V_R[0];
-	     pop2.V_R[1] = pop.V_R[1];
-	     pop2.V_R[2] = pop.V_R[2];
-	   };
-	 };
+	       if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
+	         for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	           Population &pop2 = cell->get_population(popID2);
+	           pop.RHO_R += pop2.RHO_R;
+	           pop.V_R[0] += pop2.V_R[0];
+	           pop.V_R[1] += pop2.V_R[1];
+	           pop.V_R[2] += pop2.V_R[2];
+	         };
+	         for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	           Population &pop2 = cell->get_population(popID2);
+	           pop2.RHO_R =  pop.RHO_R;
+	           pop2.V_R[0] = pop.V_R[0];
+	           pop2.V_R[1] = pop.V_R[1];
+	           pop2.V_R[2] = pop.V_R[2];
+	         };
+	       };
 
          cell->parameters[CellParams::RHOM_R  ] += array[0]*mass;
          cell->parameters[CellParams::VX_R] += array[1]*mass;
@@ -431,18 +431,18 @@ void calculateMoments_R(
 				      nBlocks);
 	 }
 	 
-         // Store species' contribution to 2nd bulk velocity moments
-         Population &pop = cell->get_population(popID);
-         for (size_t i = 0; i < nMom2; ++i) {
-            pop.P_R[i] = mass * array[i];
-         }
+     // Store species' contribution to 2nd bulk velocity moments
+     Population &pop = cell->get_population(popID);
+     for (size_t i = 0; i < nMom2; ++i) {
+       pop.P_R[i] = mass * array[i];
+     }
 
-         cell->parameters[CellParams::P_11_R] += pop.P_R[0];
-         cell->parameters[CellParams::P_22_R] += pop.P_R[1];
-         cell->parameters[CellParams::P_33_R] += pop.P_R[2];
-         cell->parameters[CellParams::P_23_R] += pop.P_R[3];
-         cell->parameters[CellParams::P_13_R] += pop.P_R[4];
-         cell->parameters[CellParams::P_12_R] += pop.P_R[5];
+     cell->parameters[CellParams::P_11_R] += pop.P_R[0];
+     cell->parameters[CellParams::P_22_R] += pop.P_R[1];
+     cell->parameters[CellParams::P_33_R] += pop.P_R[2];
+     cell->parameters[CellParams::P_23_R] += pop.P_R[3];
+     cell->parameters[CellParams::P_13_R] += pop.P_R[4];
+     cell->parameters[CellParams::P_12_R] += pop.P_R[5];
 
 	 if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
 	   for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
@@ -459,7 +459,7 @@ void calculateMoments_R(
 	   };
 	 };
 	 
-      } // for-loop over spatial cells
+    } // for-loop over spatial cells
    } // for-loop over particle species
 }
 
@@ -536,53 +536,53 @@ void calculateMoments_V(
             continue;
          }
 	 
-	 const Real mass = getObjectWrapper().particleSpecies[popID].mass;
+	     const Real mass = getObjectWrapper().particleSpecies[popID].mass;
          const Real charge = getObjectWrapper().particleSpecies[popID].charge;
 
          // Temporary array where the moments for this species are accumulated
          Real array[nMom1] = {0};
 	 
-	 int Ref=0;
-	 int MaxRef=0;
-	 if(P::activateVamr) {
-	   Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
-	   MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
-	   if(Ref < MaxRef){
-	     changeRefined(cell,popID);
-	   }
-	   // Calculate species' contribution to first velocity moments with Vamr
-	   blockVelocityFirstMomentsVamr(blockContainer,
+	     int Ref=0;
+	     int MaxRef=0;
+	     if(P::activateVamr) {
+	       Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
+	       MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
+	       if(Ref < MaxRef){
+	         changeRefined(cell,popID);
+	       }
+	       // Calculate species' contribution to first velocity moments with Vamr
+	       blockVelocityFirstMomentsVamr(blockContainer,
 					 array,
 					 nBlocks);
-	 }else {
-	   // Calculate species' contribution to first velocity moments
-	   blockVelocityFirstMoments(blockContainer,
+	       }else {
+	      // Calculate species' contribution to first velocity moments
+	      blockVelocityFirstMoments(blockContainer,
 				     array,
 				     nBlocks);
-	 }
+	      }
 	 
          // Store species' contribution to bulk velocity moments
-	 pop.RHO_V = array[0];
-	 pop.V_V[0] = divideIfNonZero(array[1], array[0]);
-	 pop.V_V[1] = divideIfNonZero(array[2], array[0]);
-	 pop.V_V[2] = divideIfNonZero(array[3], array[0]);
+	     pop.RHO_V = array[0];
+	     pop.V_V[0] = divideIfNonZero(array[1], array[0]);
+	     pop.V_V[1] = divideIfNonZero(array[2], array[0]);
+	     pop.V_V[2] = divideIfNonZero(array[3], array[0]);
       
-	 if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
-	   for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	     Population &pop2 = cell->get_population(popID2);
-	     pop.RHO_V += pop2.RHO_V;
-	     pop.V_V[0] += pop2.V_V[0];
-	     pop.V_V[1] += pop2.V_V[1];
-	     pop.V_V[2] += pop2.V_V[2];
-	   };
-	   for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	     Population &pop2 = cell->get_population(popID2);
-	     pop2.RHO_V =  pop.RHO_V;
-	     pop2.V_V[0] = pop.V_V[0];
-	     pop2.V_V[1] = pop.V_V[1];
-	     pop2.V_V[2] = pop.V_V[2];
-	   };
-	 };
+	     if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
+	       for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	         Population &pop2 = cell->get_population(popID2);
+	         pop.RHO_V += pop2.RHO_V;
+	         pop.V_V[0] += pop2.V_V[0];
+	         pop.V_V[1] += pop2.V_V[1];
+	         pop.V_V[2] += pop2.V_V[2];
+	       };
+	       for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	         Population &pop2 = cell->get_population(popID2);
+	         pop2.RHO_V =  pop.RHO_V;
+	         pop2.V_V[0] = pop.V_V[0];
+	         pop2.V_V[1] = pop.V_V[1];
+	         pop2.V_V[2] = pop.V_V[2];
+	       };
+	     };
 
          cell->parameters[CellParams::RHOM_V  ] += array[0]*mass;
          cell->parameters[CellParams::VX_V] += array[1]*mass;
@@ -636,60 +636,60 @@ void calculateMoments_V(
             continue;
          }
 
-	 const Real mass = getObjectWrapper().particleSpecies[popID].mass;
+	     const Real mass = getObjectWrapper().particleSpecies[popID].mass;
 
-	 // Temporary array for storing moments
-	 Real array[nMom2] = {0};
+	     // Temporary array for storing moments
+	     Real array[nMom2] = {0};
       
-	 int Ref=0;
-	 int MaxRef=0;
-	 if(P::activateVamr) {
-	   int Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
-	   int MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
-	   // Calculate species' contribution to second velocity moments with Vamr
-	   blockVelocitySecondMomentsVamr(blockContainer,
+	     int Ref=0;
+	     int MaxRef=0;
+	     if(P::activateVamr) {
+	       int Ref=getObjectWrapper().particleSpecies[popID].RefinementLevel;
+	       int MaxRef=getObjectWrapper().particleSpecies[popID].MaxRefinementLevel;
+	       // Calculate species' contribution to second velocity moments with Vamr
+	       blockVelocitySecondMomentsVamr(blockContainer,
 					  cell->parameters[CellParams::VX],
 					  cell->parameters[CellParams::VY],
 					  cell->parameters[CellParams::VZ],
 					  array,
 					  nBlocks);
-	 }else{
-	   // Calculate species' contribution to second velocity moments
-	   blockVelocitySecondMoments(blockContainer,
+	    }else{
+	       // Calculate species' contribution to second velocity moments
+	       blockVelocitySecondMoments(blockContainer,
 				      cell->parameters[CellParams::VX],
 				      cell->parameters[CellParams::VY],
 				      cell->parameters[CellParams::VZ],
 				      array,
 				      nBlocks);
-	 }
+	    }
       
-         // Store species' contribution to 2nd bulk velocity moments
-         Population &pop = cell->get_population(popID);
-         for (size_t i = 0; i < nMom2; ++i) {
-            pop.P_V[i] = mass * array[i];
-         }
+        // Store species' contribution to 2nd bulk velocity moments
+        Population &pop = cell->get_population(popID);
+        for (size_t i = 0; i < nMom2; ++i) {
+          pop.P_V[i] = mass * array[i];
+        }
 
-         cell->parameters[CellParams::P_11_V] += pop.P_V[0];
-         cell->parameters[CellParams::P_22_V] += pop.P_V[1];
-         cell->parameters[CellParams::P_33_V] += pop.P_V[2];
-         cell->parameters[CellParams::P_23_V] += pop.P_V[3];
-         cell->parameters[CellParams::P_13_V] += pop.P_V[4];
-         cell->parameters[CellParams::P_12_V] += pop.P_V[5];
+        cell->parameters[CellParams::P_11_V] += pop.P_V[0];
+        cell->parameters[CellParams::P_22_V] += pop.P_V[1];
+        cell->parameters[CellParams::P_33_V] += pop.P_V[2];
+        cell->parameters[CellParams::P_23_V] += pop.P_V[3];
+        cell->parameters[CellParams::P_13_V] += pop.P_V[4];
+        cell->parameters[CellParams::P_12_V] += pop.P_V[5];
 	 
-	 if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
-	   for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	     Population &pop2 = cell->get_population(popID2);
-	     for (size_t i=0; i<nMom2; ++i) {
-	       pop.P_V[i] +=   pop2.P_V[i];
-	     };
-	   };
-	   for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	     Population &pop2 = cell->get_population(popID2);
-	     for (size_t i=0; i<nMom2; ++i) {
-	       pop2.P_V[i] = pop.P_V[i];
-	     };
-	   };
-	 };
+	    if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
+	      for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	        Population &pop2 = cell->get_population(popID2);
+	        for (size_t i=0; i<nMom2; ++i) {
+	          pop.P_V[i] +=   pop2.P_V[i];
+	        };
+	      };
+	      for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	        Population &pop2 = cell->get_population(popID2);
+	        for (size_t i=0; i<nMom2; ++i) {
+	          pop2.P_V[i] = pop.P_V[i];
+	        };
+	      };
+	    };
 	 
       } // for-loop over spatial cells
    } // for-loop over particle species
