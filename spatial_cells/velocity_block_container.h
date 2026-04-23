@@ -280,7 +280,7 @@ namespace vmesh {
          const vmesh::LocalID numberOfBlocksP = parameters.size()/BlockParams::N_VELOCITY_BLOCK_PARAMS;
          if (source >= numberOfBlocks) ok = false;
          if (source >= currentCapacity) ok = false;
-	 if (source >= numberOfBlocksR) ok = false;
+	     if (source >= numberOfBlocksR) ok = false;
          if (source >= currentCapacityR) ok = false;
          if (source >= numberOfBlocksP) ok = false;
          if (source >= currentCapacityP) ok = false;
@@ -289,11 +289,11 @@ namespace vmesh {
          if (numberOfBlocks > currentCapacity) ok = false;
          if (source != numberOfBlocks-1) ok = false; // only allows moving from last entry
          if (source != numberOfBlocksP-1) ok = false;
-	 if (source != numberOfBlocksR-1) ok = false;
+	     if (source != numberOfBlocksR-1) ok = false;
          #ifdef USE_GPU
          if (cachedCapacity != currentCapacity) ok = false;
          #endif
-	 if (currentCapacityR != currentCapacity) ok = false;
+	     if (currentCapacityR != currentCapacity) ok = false;
          if (numberOfBlocksR != numberOfBlocks) ok = false;
          if (currentCapacityP != currentCapacity) ok = false;
          if (numberOfBlocksP != numberOfBlocks) ok = false;
@@ -969,7 +969,7 @@ namespace vmesh {
       return block_data[blockLID*WID3+cell];
    }
 
-  inline const Realf& VelocityBlockContainer::getRefined(const vmesh::LocalID blockLID,const unsigned int cell) const {
+  inline const uint8_t& VelocityBlockContainer::getRefined(const vmesh::LocalID blockLID,const unsigned int cell) const {
       const vmesh::LocalID numberOfBlocks = block_data.size()/WID3;
       bool ok = true;
       if (cell >= WID3) {
@@ -1036,7 +1036,7 @@ namespace vmesh {
       block_data[blockLID*WID3+cell] = value;
    }
 
-    inline void VelocityBlockContainer::setRefined(const vmesh::LocalID blockLID,const unsigned int cell,const bool value) {
+    inline void VelocityBlockContainer::setRefined(const vmesh::LocalID blockLID,const unsigned int cell,const uint8_t value) {
       const vmesh::LocalID numberOfBlocks = block_data.size()/WID3;
       bool ok = true;
       if (cell >= WID3) {
