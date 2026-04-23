@@ -160,7 +160,6 @@ bool writeVelocityDistributionData(const uint popID,Writer& vlsvWriter,
       totalBlocks+=mpiGrid[cells[i]]->get_number_of_velocity_blocks(popID);
       blocksPerCell.push_back(mpiGrid[cells[i]]->get_number_of_velocity_blocks(popID));
    }
-
    // The name of the mesh is "SpatialGrid"
    attribs["mesh"] = spatMeshName;
 
