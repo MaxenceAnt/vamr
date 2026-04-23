@@ -649,15 +649,9 @@ bool writeDomainExtents(Writer& vlsvWriter, const string& meshName, const std::v
    map<string, string> xmlAttributes;
    // Put the meshName
    xmlAttributes["mesh"] = meshName;
-   //Get the first cell in domain as a base for comparing against
-   const SpatialCell& firstCell = *mpiGrid[*local_cells.begin()]; 
-   Real ret[6] = {
-       firstCell.parameters[CellParams::XCRD], firstCell.parameters[CellParams::XCRD] + firstCell.parameters[CellParams::DX],
-       firstCell.parameters[CellParams::YCRD], firstCell.parameters[CellParams::YCRD] + firstCell.parameters[CellParams::DY],
-       firstCell.parameters[CellParams::ZCRD], firstCell.parameters[CellParams::ZCRD] + firstCell.parameters[CellParams::DZ],
-   };
+   Real ret[6]={0,0,0,0,0,0};
    //Loop through the domain cells and find a box that bounds all the cells
-   for (it = local_cells.begin() + 1; it != local_cells.end(); it++) {
+   for (it = local_cells.begin() ; it != local_cells.end(); it++) {
       CellID cellId = *it;
 
       const SpatialCell& cell = *mpiGrid[cellId];
@@ -666,6 +660,12 @@ bool writeDomainExtents(Writer& vlsvWriter, const string& meshName, const std::v
           cell.parameters[CellParams::YCRD], cell.parameters[CellParams::YCRD] + cell.parameters[CellParams::DY],
           cell.parameters[CellParams::ZCRD], cell.parameters[CellParams::ZCRD] + cell.parameters[CellParams::DZ],
       };
+      if (it==local_cells.begin()) {
+        for (uint8_t i = 0 ; i!=6;i++){ 
+          ret[i]=lowcorner[i];
+        }
+        continue;
+      }
       for (uint8_t i = 0; i != 6; i++) {
          //min
          if ((lowcorner[i] < ret[i]) && (i % 2 == 0)) {
@@ -1497,7 +1497,6 @@ bool writeGrid(
    if( writeZoneGlobalIdNumbers( mpiGrid, vlsvWriter, meshName, local_cells, ghost_cells ) == false ) {
       return false;
    }
-
    //Write domain sizes:
    if( writeDomainSizes( vlsvWriter, meshName, local_cells.size(), ghost_cells.size() ) == false ) {
       return false;
