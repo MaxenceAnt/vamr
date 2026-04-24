@@ -779,7 +779,7 @@ void calculateAcceleration(const uint popID,const uint globalMaxSubcycles,const 
          thisSubcycleDt = -thisSubcycleDt;
       }
       spatial_cell::Population& pop = mpiGrid[cellID]->get_population(popID);
-      pop.subcycleDt = thisSubcycleDt;      
+      pop.subcycleDt = thisSubcycleDt;
    }
 
    // Semi-Lagrangian acceleration for all cells
@@ -797,7 +797,7 @@ void calculateAcceleration(const uint popID,const uint globalMaxSubcycles,const 
       performs a full neighbour block list update, and is called for all accelerated cells.
    **/
    if (step > 0 && step < (globalMaxSubcycles - 1)) {
-     adjustVelocityBlocks(mpiGrid, acceleratedCells, false, popID);
+      adjustVelocityBlocks(mpiGrid, acceleratedCells, false, popID);
    }
 }
 
@@ -815,6 +815,7 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
    MPI_Comm_rank(MPI_COMM_WORLD,&myRank);
 
    if (dt == 0.0 && P::tstep > 0) {
+
       // Even if acceleration is turned off we need to adjust velocity blocks
       // because the boundary conditions may have altered the velocity space,
       // and to update changes in no-content blocks during translation.
