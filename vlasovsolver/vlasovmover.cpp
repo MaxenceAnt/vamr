@@ -744,7 +744,7 @@ void calculateAcceleration(const uint popID,const uint globalMaxSubcycles,const 
    // Calculate velocity moments, these are needed to
    // calculate the transforms used in the accelerations.
    // Calculated moments are stored in the "_V" variables.
-   calculateMoments_V(mpiGrid, acceleratedCells, false); 
+   calculateMoments_V(mpiGrid, acceleratedCells, false);
 
    // set seed, initialise generator and get value. The order is the same
    // for all cells, but varies with timestep.
@@ -757,7 +757,7 @@ void calculateAcceleration(const uint popID,const uint globalMaxSubcycles,const 
    for (size_t c=0; c<acceleratedCells.size(); ++c) {
       const CellID cellID = acceleratedCells[c];
       const Real maxVdt = mpiGrid[cellID]->get_max_v_dt(popID);
-      
+
       /**
          Compute subcycle dt. The length is maxVdt on all steps
          except the (possible) last one. This was to keep neighboring
@@ -779,8 +779,7 @@ void calculateAcceleration(const uint popID,const uint globalMaxSubcycles,const 
          thisSubcycleDt = -thisSubcycleDt;
       }
       spatial_cell::Population& pop = mpiGrid[cellID]->get_population(popID);
-      pop.subcycleDt = thisSubcycleDt;
-      
+      pop.subcycleDt = thisSubcycleDt;      
    }
 
    // Semi-Lagrangian acceleration for all cells
@@ -789,7 +788,7 @@ void calculateAcceleration(const uint popID,const uint globalMaxSubcycles,const 
 #else
    cpu_accelerate_cells(mpiGrid,acceleratedCells,popID,map_order);
 #endif
-   
+
    /**
       Adjust velocity blocks after each subcycle to keep number of blocks managable. This
       call does not perform a full neighbour block list update (third argument) but
@@ -819,8 +818,8 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
       // Even if acceleration is turned off we need to adjust velocity blocks
       // because the boundary conditions may have altered the velocity space,
       // and to update changes in no-content blocks during translation.
-     for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
-	adjustVelocityBlocks(mpiGrid, cells, true, popID);
+      for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
+	     adjustVelocityBlocks(mpiGrid, cells, true, popID);
       }
    } else {
       // Fairly ugly but no goto
@@ -874,7 +873,7 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
 
          // Compute global maximum for number of subcycles
          MPI_Allreduce(&maxSubcycles, &globalMaxSubcycles, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-	 
+
          // TODO: move subcycling to lower level call in order to optimize GPU memory calls
          // substep global max times
          for(uint step=0; step<(uint)globalMaxSubcycles; ++step) {
@@ -887,7 +886,7 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
                   }
                }
                acceleratedCells.swap(temp);
-             }
+            }
             // Accelerate population over one subcycle step
             calculateAcceleration(popID,(uint)globalMaxSubcycles,step,mpiGrid,acceleratedCells,dt);
             if(step==0 && (uint)globalMaxSubcycles > 1){
@@ -896,8 +895,7 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
          } // for-loop over acceleration substeps
 
          // final adjust for all cells, also updating full remote block lists
-        // Moved because already in the previous loop
-	 adjustVelocityBlocks(mpiGrid, cells, true, popID);
+	     adjustVelocityBlocks(mpiGrid, cells, true, popID);
       } // for-loop over particle species
    }
 
