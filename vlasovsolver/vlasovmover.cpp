@@ -820,7 +820,7 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
       // because the boundary conditions may have altered the velocity space,
       // and to update changes in no-content blocks during translation.
       for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
-	     adjustVelocityBlocks(mpiGrid, cells, true, popID);
+         adjustVelocityBlocks(mpiGrid, cells, true, popID);
       }
    } else {
       // Fairly ugly but no goto
@@ -896,7 +896,7 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
          } // for-loop over acceleration substeps
 
          // final adjust for all cells, also updating full remote block lists
-	     adjustVelocityBlocks(mpiGrid, cells, true, popID);
+         adjustVelocityBlocks(mpiGrid, cells, true, popID);
       } // for-loop over particle species
    }
 
