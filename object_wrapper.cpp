@@ -203,7 +203,7 @@ bool ObjectWrapper::getPopulationParameters() {
             + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "\n";
          std::cerr << errormsg;
       }
-	   
+
       /* Special handling of WID=8; halve the number of blocks */
       int myRank;
       MPI_Comm_rank(MPI_COMM_WORLD,&myRank);
