@@ -120,6 +120,7 @@ bool P::recalculateStencils = true;
 bool P::propagateVlasovAcceleration = true;
 bool P::propagateVlasovTranslation = true;
 bool P::propagateField = true;
+
 bool P::dynamicTimestep = true;
 bool P::activateVamr = false;
 
