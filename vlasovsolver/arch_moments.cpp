@@ -108,61 +108,61 @@ void calculateCellMoments(spatial_cell::SpatialCell* cell,
 	    blockVelocityFirstMomentsVamr(blockContainer,
 				      array,
 				      nBlocks);
-        }else {
+      }else {
 	    // Calculate species' contribution to first velocity moments
 	    blockVelocityFirstMoments(blockContainer,
 				  array,
 				  nBlocks);
-        }
+      }
   
 
-        pop.RHO = array[0];
-        pop.V[0] = divideIfNonZero(array[1], array[0]);
-        pop.V[1] = divideIfNonZero(array[2], array[0]);
-        pop.V[2] = divideIfNonZero(array[3], array[0]);
+      pop.RHO = array[0];
+      pop.V[0] = divideIfNonZero(array[1], array[0]);
+      pop.V[1] = divideIfNonZero(array[2], array[0]);
+      pop.V[2] = divideIfNonZero(array[3], array[0]);
 
-        //      std::cout<< " popID  "<< popID << " a pour RHO  "<< pop.RHO <<std::endl;
-        if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
-	      for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	        Population &pop2 = cell->get_population(popID2);
-	        pop.RHO += pop2.RHO;
-	        pop.V[0] += pop2.V[0];
-	        pop.V[1] += pop2.V[1];
-	        pop.V[2] += pop2.V[2];
-	      };
-	      for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	        Population &pop2 = cell->get_population(popID2);
-	        pop2.RHO =  pop.RHO;
-	        pop2.V[0] = pop.V[0];
-	        pop2.V[1] = pop.V[1];
-	        pop2.V[2] = pop.V[2];
-	      };
-        };
+      //      std::cout<< " popID  "<< popID << " a pour RHO  "<< pop.RHO <<std::endl;
+      if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
+	    for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	      Population &pop2 = cell->get_population(popID2);
+	      pop.RHO += pop2.RHO;
+	      pop.V[0] += pop2.V[0];
+	      pop.V[1] += pop2.V[1];
+	      pop.V[2] += pop2.V[2];
+	    };
+	    for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	      Population &pop2 = cell->get_population(popID2);
+	      pop2.RHO =  pop.RHO;
+	      pop2.V[0] = pop.V[0];
+	      pop2.V[1] = pop.V[1];
+	      pop2.V[2] = pop.V[2];
+	    };
+      };
 	     
 
-        if (!computePopulationMomentsOnly) {
-          // Store species' contribution to bulk velocity moments
-          cell->parameters[CellParams::RHOM  ] += array[0]*mass;
-          cell->parameters[CellParams::VX] += array[1]*mass;
-          cell->parameters[CellParams::VY] += array[2]*mass;
-          cell->parameters[CellParams::VZ] += array[3]*mass;
-          cell->parameters[CellParams::RHOQ  ] += array[0]*charge;
-        }
-   } // for-loop over particle species
+      if (!computePopulationMomentsOnly) {
+        // Store species' contribution to bulk velocity moments
+        cell->parameters[CellParams::RHOM  ] += array[0]*mass;
+        cell->parameters[CellParams::VX] += array[1]*mass;
+        cell->parameters[CellParams::VY] += array[2]*mass;
+        cell->parameters[CellParams::VZ] += array[3]*mass;
+        cell->parameters[CellParams::RHOQ  ] += array[0]*charge;
+      }
+    } // for-loop over particle species
 
-   if(!computePopulationMomentsOnly) {
+    if(!computePopulationMomentsOnly) {
       cell->parameters[CellParams::VX] = divideIfNonZero(cell->parameters[CellParams::VX], cell->parameters[CellParams::RHOM]);
       cell->parameters[CellParams::VY] = divideIfNonZero(cell->parameters[CellParams::VY], cell->parameters[CellParams::RHOM]);
       cell->parameters[CellParams::VZ] = divideIfNonZero(cell->parameters[CellParams::VZ], cell->parameters[CellParams::RHOM]);
-   }
+    }
 
-   // Compute second moments only if requested
-   if (computeSecond == false) {
+    // Compute second moments only if requested
+    if (computeSecond == false) {
       return;
-   }
+    }
 
-   // Loop over all particle species
-   for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
+    // Loop over all particle species
+    for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
       #ifdef USE_GPU
       vmesh::VelocityMesh* vmesh    = cell->dev_get_velocity_mesh(popID);
       vmesh::VelocityBlockContainer* blockContainer = cell->dev_get_velocity_blocks(popID);
@@ -206,7 +206,7 @@ void calculateCellMoments(spatial_cell::SpatialCell* cell,
       for (size_t i=0; i<nMom2; ++i) {
          pop.P[i] = mass * array[i];
       }
-      
+
       if (!computePopulationMomentsOnly) {
          cell->parameters[CellParams::P_11] += pop.P[0];
          cell->parameters[CellParams::P_22] += pop.P[1];
@@ -323,35 +323,35 @@ void calculateMoments_R(
 	       blockVelocityFirstMomentsVamr(blockContainer,
 					 array,
 					 nBlocks);
-	       }else {
+	     }else {
 	       // Calculate species' contribution to first velocity moments
 	       blockVelocityFirstMoments(blockContainer,
 				     array,
 				     nBlocks);
-	       }
+	     }
 	
-           // Store species' contribution to bulk velocity moments
-	       pop.RHO_R = array[0];
-	       pop.V_R[0] = divideIfNonZero(array[1], array[0]);
-	       pop.V_R[1] = divideIfNonZero(array[2], array[0]);
-           pop.V_R[2] = divideIfNonZero(array[3], array[0]);
+         // Store species' contribution to bulk velocity moments
+	     pop.RHO_R = array[0];
+	     pop.V_R[0] = divideIfNonZero(array[1], array[0]);
+	     pop.V_R[1] = divideIfNonZero(array[2], array[0]);
+         pop.V_R[2] = divideIfNonZero(array[3], array[0]);
 
-	       if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
-	         for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	           Population &pop2 = cell->get_population(popID2);
-	           pop.RHO_R += pop2.RHO_R;
-	           pop.V_R[0] += pop2.V_R[0];
-	           pop.V_R[1] += pop2.V_R[1];
-	           pop.V_R[2] += pop2.V_R[2];
-	         };
-	         for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
-	           Population &pop2 = cell->get_population(popID2);
-	           pop2.RHO_R =  pop.RHO_R;
-	           pop2.V_R[0] = pop.V_R[0];
-	           pop2.V_R[1] = pop.V_R[1];
-	           pop2.V_R[2] = pop.V_R[2];
-	         };
+	     if(P::activateVamr && Ref==MaxRef && MaxRef>0 ){
+	       for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	         Population &pop2 = cell->get_population(popID2);
+	         pop.RHO_R += pop2.RHO_R;
+	         pop.V_R[0] += pop2.V_R[0];
+	         pop.V_R[1] += pop2.V_R[1];
+	         pop.V_R[2] += pop2.V_R[2];
 	       };
+	       for (uint popID2=(popID-MaxRef); popID2<popID; ++popID2) {
+	         Population &pop2 = cell->get_population(popID2);
+	         pop2.RHO_R =  pop.RHO_R;
+	         pop2.V_R[0] = pop.V_R[0];
+	         pop2.V_R[1] = pop.V_R[1];
+	         pop2.V_R[2] = pop.V_R[2];
+	       };
+	     };
 
          cell->parameters[CellParams::RHOM_R  ] += array[0]*mass;
          cell->parameters[CellParams::VX_R] += array[1]*mass;
@@ -554,12 +554,12 @@ void calculateMoments_V(
 	       blockVelocityFirstMomentsVamr(blockContainer,
 					 array,
 					 nBlocks);
-	       }else {
-	      // Calculate species' contribution to first velocity moments
-	      blockVelocityFirstMoments(blockContainer,
+	     }else {
+	       // Calculate species' contribution to first velocity moments
+	       blockVelocityFirstMoments(blockContainer,
 				     array,
 				     nBlocks);
-	      }
+	     }
 	 
          // Store species' contribution to bulk velocity moments
 	     pop.RHO_V = array[0];
@@ -704,8 +704,8 @@ void vamr_transfer_values(
   phiprof::Timer computeMomentsTimer {"vamr_transfer_value"};
   // Loop over all particle species
 #pragma omp parallel for schedule(dynamic,1)
-    for (size_t c=0; c<cells.size(); ++c) {
-      SpatialCell* cell = mpiGrid[cells[c]];
+  for (size_t c=0; c<cells.size(); ++c) {
+    SpatialCell* cell = mpiGrid[cells[c]];
 
 #ifdef USE_GPU
       vmesh::VelocityMesh* vmesh    = cell->dev_get_velocity_mesh(popID);
@@ -718,71 +718,70 @@ void vamr_transfer_values(
       vmesh::VelocityBlockContainer* blockContainer = cell->get_velocity_blocks(popID);
       vmesh::VelocityBlockContainer* blockContainerraf = cell->get_velocity_blocks(popID+1);
 #endif
-      const uint nBlocks = cell->get_velocity_mesh(popID)->size();
-      Population &pop = cell->get_population(popID);
-      if (nBlocks == 0) {
-	continue;
-      }
-
-      Realf *data = blockContainer->getData();
-      Realf *dataraf = blockContainerraf->getData();
-  
-      for (vmesh::LocalID localID=0; localID<vmesh->size(); ++localID) {
-	const vmesh::GlobalID globalID = vmesh->getGlobalID(localID);	   
-	   
-	vmesh::LocalID Indices[3];
-	vmesh->getIndices(globalID, Indices[0], Indices[1], Indices[2]);
-
-	for (int i=0; i<2; ++i) {
-	  for (int j=0; j<2; ++j) {
-	    for (int k=0; k<2; ++k) {
-	      //Indices of the refined blocks
-	      //Each coarse block contains 8 refined blocks
-	      vmesh::LocalID Indicesraf[3];
-	      Indicesraf[0] = 2*Indices[0]+i ;
-	      Indicesraf[1] = 2*Indices[1]+j ;
-	      Indicesraf[2] = 2*Indices[2]+k ;
-
-	      const vmesh::GlobalID globalIDraf=vmeshraf->getGlobalID(Indicesraf);
-
-	      if (globalIDraf ==  vmeshraf->invalidGlobalID()) {
-		continue;
-	      }else{  
-		const vmesh::LocalID  localIDraf=vmeshraf->getLocalID(globalIDraf);
-		if (localIDraf == vmeshraf->invalidLocalID()) {
-		  continue;
-		} else{
-		  for (int i2=0; i2<2; ++i2) {
-		    for (int j2=0; j2<2; ++j2) {
-		      for (int k2=0; k2<2; ++k2) {
-	        	Realf summ=0;
-			Realf datasave= data[localID*WID3+cellIndex(2*i+i2,2*j+j2,2*k+k2)];
-			data[localID*WID3+cellIndex(2*i+i2,2*j+j2,2*k+k2)]=0;
-			for (int i3=0; i3<2; ++i3) {
-			  for (int j3=0; j3<2; ++j3) {
-			    for (int k3=0; k3<2; ++k3) {
-			      if(dataraf[localIDraf*WID3+cellIndex(2*i2+i3,2*j2+j3,2*k2+k3)]>0){
-				data[localID*WID3+cellIndex(2*i+i2,2*j+j2,2*k+k2)]+= dataraf[localIDraf*WID3+cellIndex(2*i2+i3,2*j2+j3,2*k2+k3)]/8.0;
-				summ+=1.0;
-			      }
-			    }
-			  }
-			}
-			if (summ!=8.0){
-			  data[localID*WID3+cellIndex(2*i+i2,2*j+j2,2*k+k2)]=datasave;
-			}
-		      };
-		    };
-		  };//loop over refined cells
-		};
-	      };
-	    };//loop over refined blocks
-	  };
-	};
-      };
+    const uint nBlocks = cell->get_velocity_mesh(popID)->size();
+    Population &pop = cell->get_population(popID);
+    if (nBlocks == 0) {
+	  continue;
     }
-}
 
+    Realf *data = blockContainer->getData();
+    Realf *dataraf = blockContainerraf->getData();
+  
+    for (vmesh::LocalID localID=0; localID<vmesh->size(); ++localID) {
+	  const vmesh::GlobalID globalID = vmesh->getGlobalID(localID);	   
+	   
+	  vmesh::LocalID Indices[3];
+	  vmesh->getIndices(globalID, Indices[0], Indices[1], Indices[2]);
+
+	  for (int i=0; i<2; ++i) {
+	    for (int j=0; j<2; ++j) {
+	      for (int k=0; k<2; ++k) {
+	        //Indices of the refined blocks
+	        //Each coarse block contains 8 refined blocks
+	        vmesh::LocalID Indicesraf[3];
+	        Indicesraf[0] = 2*Indices[0]+i ;
+	        Indicesraf[1] = 2*Indices[1]+j ;
+	        Indicesraf[2] = 2*Indices[2]+k ;
+
+	        const vmesh::GlobalID globalIDraf=vmeshraf->getGlobalID(Indicesraf);
+
+	        if (globalIDraf ==  vmeshraf->invalidGlobalID()) {
+		      continue;
+	        }else{  
+		      const vmesh::LocalID  localIDraf=vmeshraf->getLocalID(globalIDraf);
+		      if (localIDraf == vmeshraf->invalidLocalID()) {
+		        continue;
+		      }else{
+		        for (int i2=0; i2<2; ++i2) {
+		          for (int j2=0; j2<2; ++j2) {
+		            for (int k2=0; k2<2; ++k2) {
+	        	      Realf summ=0;
+			          Realf datasave= data[localID*WID3+cellIndex(2*i+i2,2*j+j2,2*k+k2)];
+			          data[localID*WID3+cellIndex(2*i+i2,2*j+j2,2*k+k2)]=0;
+			          for (int i3=0; i3<2; ++i3) {
+			            for (int j3=0; j3<2; ++j3) {
+			              for (int k3=0; k3<2; ++k3) {
+			                if(dataraf[localIDraf*WID3+cellIndex(2*i2+i3,2*j2+j3,2*k2+k3)]>0){
+				              data[localID*WID3+cellIndex(2*i+i2,2*j+j2,2*k+k2)]+= dataraf[localIDraf*WID3+cellIndex(2*i2+i3,2*j2+j3,2*k2+k3)]/8.0;
+				              summ+=1.0;
+			                }
+			              }
+			            }
+			          }
+			          if (summ!=8.0){
+			            data[localID*WID3+cellIndex(2*i+i2,2*j+j2,2*k+k2)]=datasave;
+			          }
+		            };
+		          };
+		        };//loop over refined cells
+		      };
+	        };
+	      };//loop over refined blocks
+	    };
+	  };
+    };
+  }
+}
 
 
  void changeRefined(spatial_cell::SpatialCell* cell,
@@ -798,64 +797,57 @@ void vamr_transfer_values(
      
 #pragma omp parallel for schedule(dynamic,1)       
      for (vmesh::LocalID localID=0; localID<vmesh->size(); ++localID) {
-       const vmesh::GlobalID globalID = vmesh->getGlobalID(localID);
-       if (globalID ==  vmesh->invalidGlobalID()) {
-	 std::cout<< " BIZARRE, BUG POUR  "<<localID<<std::endl;
-       };
-	   
+       const vmesh::GlobalID globalID = vmesh->getGlobalID(localID);	   
 	   
        vmesh::LocalID Indices[3];
        vmesh->getIndices(globalID, Indices[0], Indices[1], Indices[2]);
 
        for (int i=0; i<2; ++i) {
-	 for (int j=0; j<2; ++j) {
-	   for (int k=0; k<2; ++k) {
-	     //Indices of the refined blocks
-	     //Each coarse block contains 8 refined blocks
-	     vmesh::LocalID Indicesraf[3];
-	     Indicesraf[0] = 2*Indices[0]+i ;
-	     Indicesraf[1] = 2*Indices[1]+j ;
-	     Indicesraf[2] = 2*Indices[2]+k ;
+	     for (int j=0; j<2; ++j) {
+	       for (int k=0; k<2; ++k) {
+	       //Indices of the refined blocks
+	       //Each coarse block contains 8 refined blocks
+	       vmesh::LocalID Indicesraf[3];
+	       Indicesraf[0] = 2*Indices[0]+i ;
+	       Indicesraf[1] = 2*Indices[1]+j ;
+	       Indicesraf[2] = 2*Indices[2]+k ;
 
-	     const vmesh::GlobalID globalIDraf=vmeshraf->getGlobalID(Indicesraf);
+	       const vmesh::GlobalID globalIDraf=vmeshraf->getGlobalID(Indicesraf);
 
-	     if (globalIDraf ==  vmeshraf->invalidGlobalID()) {
-	       //each refined block represent (WID/2)^3 coarse cells (8 in our case) 
-	       refined[localID*WID3+cellIndex(2*i,2*j,2*k)]=false;
-	       refined[localID*WID3+cellIndex(2*i+1,2*j,2*k)]=false;
-	       refined[localID*WID3+cellIndex(2*i,2*j+1,2*k)]=false;
-	       refined[localID*WID3+cellIndex(2*i,2*j,2*k+1)]=false;
-	       refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k)]=false;
-	       refined[localID*WID3+cellIndex(2*i,2*j+1,2*k+1)]=false;
-	       refined[localID*WID3+cellIndex(2*i+1,2*j,2*k+1)]=false;
-	       refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k+1)]=false; 
-	       //dehors+=1;
-	     }else{  
-
-	       const vmesh::LocalID  localIDraf=vmeshraf->getLocalID(globalIDraf);
-
-	       if (localIDraf == vmeshraf->invalidLocalID()) {
-		 refined[localID*WID3+cellIndex(2*i,2*j,2*k)]=false;
-		 refined[localID*WID3+cellIndex(2*i+1,2*j,2*k)]=false;
-		 refined[localID*WID3+cellIndex(2*i,2*j+1,2*k)]=false;
-		 refined[localID*WID3+cellIndex(2*i,2*j,2*k+1)]=false;
-		 refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k)]=false;
-		 refined[localID*WID3+cellIndex(2*i,2*j+1,2*k+1)]=false;
-		 refined[localID*WID3+cellIndex(2*i+1,2*j,2*k+1)]=false;
-		 refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k+1)]=false; 
-	       } else{
-		 refined[localID*WID3+cellIndex(2*i,2*j,2*k)]=true;
-		 refined[localID*WID3+cellIndex(2*i+1,2*j,2*k)]=true;
-		 refined[localID*WID3+cellIndex(2*i,2*j+1,2*k)]=true;
-		 refined[localID*WID3+cellIndex(2*i,2*j,2*k+1)]=true;
-		 refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k)]=true;
-		 refined[localID*WID3+cellIndex(2*i,2*j+1,2*k+1)]=true;
-		 refined[localID*WID3+cellIndex(2*i+1,2*j,2*k+1)]=true;
-		 refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k+1)]=true; 
+	       if (globalIDraf ==  vmeshraf->invalidGlobalID()) {
+	         //each refined block represent (WID/2)^3 coarse cells (8 in our case) 
+	         refined[localID*WID3+cellIndex(2*i,2*j,2*k)]=false;
+	         refined[localID*WID3+cellIndex(2*i+1,2*j,2*k)]=false;
+	         refined[localID*WID3+cellIndex(2*i,2*j+1,2*k)]=false;
+	         refined[localID*WID3+cellIndex(2*i,2*j,2*k+1)]=false;
+	         refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k)]=false;
+	         refined[localID*WID3+cellIndex(2*i,2*j+1,2*k+1)]=false;
+	         refined[localID*WID3+cellIndex(2*i+1,2*j,2*k+1)]=false;
+	         refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k+1)]=false; 
+	       }else{  
+	         const vmesh::LocalID  localIDraf=vmeshraf->getLocalID(globalIDraf);
+	         if (localIDraf == vmeshraf->invalidLocalID()) {
+		       refined[localID*WID3+cellIndex(2*i,2*j,2*k)]=false;
+		       refined[localID*WID3+cellIndex(2*i+1,2*j,2*k)]=false;
+		       refined[localID*WID3+cellIndex(2*i,2*j+1,2*k)]=false;
+		       refined[localID*WID3+cellIndex(2*i,2*j,2*k+1)]=false;
+		       refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k)]=false;
+		       refined[localID*WID3+cellIndex(2*i,2*j+1,2*k+1)]=false;
+		       refined[localID*WID3+cellIndex(2*i+1,2*j,2*k+1)]=false;
+		       refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k+1)]=false; 
+	         }else{
+		       refined[localID*WID3+cellIndex(2*i,2*j,2*k)]=true;
+		       refined[localID*WID3+cellIndex(2*i+1,2*j,2*k)]=true;
+		       refined[localID*WID3+cellIndex(2*i,2*j+1,2*k)]=true;
+		       refined[localID*WID3+cellIndex(2*i,2*j,2*k+1)]=true;
+		       refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k)]=true;
+		       refined[localID*WID3+cellIndex(2*i,2*j+1,2*k+1)]=true;
+		       refined[localID*WID3+cellIndex(2*i+1,2*j,2*k+1)]=true;
+		       refined[localID*WID3+cellIndex(2*i+1,2*j+1,2*k+1)]=true; 
+	         };
 	       };
 	     };
 	   };
-	 };
-       };
      };
+   };
   }
