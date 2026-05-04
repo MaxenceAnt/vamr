@@ -534,9 +534,9 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
             SpatialCell* SC = mpiGrid[cells[c]];
             const vmesh::VelocityMesh* vmesh = SC->get_velocity_mesh(popID);
 
-	    if (P::activateVamr && getObjectWrapper().particleSpecies[popID].RefinementLevel<getObjectWrapper().particleSpecies[popID].MaxRefinementLevel){
-	      changeRefined(SC,popID);
-	    }
+	//    if (P::activateVamr && getObjectWrapper().particleSpecies[popID].RefinementLevel<getObjectWrapper().particleSpecies[popID].MaxRefinementLevel){
+	//      changeRefined(SC,popID);
+	//    }
 
             // disregard boundary cells, in preparation for acceleration
             if (  (SC->sysBoundaryFlag == sysboundarytype::NOT_SYSBOUNDARY) ||
@@ -593,14 +593,22 @@ void calculateAcceleration(dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry>& 
    // Recalculate "_V" velocity moments
    calculateMoments_V(mpiGrid,cells,true,(dt==0));
 
-   if (P::activateVamr){
-       for (uint popID=(getObjectWrapper().particleSpecies.size()-1); popID>0; --popID) {
-	 //Transfert the info from popID to popID-1
-	 if(getObjectWrapper().particleSpecies[popID].RefinementLevel>0){
-	   vamr_transfer_values(mpiGrid,cells,popID-1);
-	 }
+     if (P::activateVamr){
+     for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
+       if (getObjectWrapper().particleSpecies[popID].RefinementLevel<getObjectWrapper().particleSpecies[popID].MaxRefinementLevel){
+         for (size_t c=0; c<cells.size(); ++c) {
+	   SpatialCell* SC = mpiGrid[cells[c]];
+	   changeRefined(SC,popID);
+         }
        }
      }
+     for (uint popID=(getObjectWrapper().particleSpecies.size()-1); popID>0; --popID) {
+       //Transfert the info from popID to popID-1
+       if(getObjectWrapper().particleSpecies[popID].RefinementLevel>0){
+         vamr_transfer_values(mpiGrid,cells,popID-1);
+       }
+     }
+   }
    
    // Set CellParams::MAXVDT to be the minimum dt of all per-species values
    #pragma omp parallel for
